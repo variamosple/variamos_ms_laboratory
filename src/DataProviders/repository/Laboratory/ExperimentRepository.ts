@@ -339,6 +339,8 @@ export default class ExperimentRepository {
           metric.formula,
           metric.unit,
           metric.script,
+          metric.createdAt,
+          metric.updatedAt,
           metric.description,
           metric.userId
         )

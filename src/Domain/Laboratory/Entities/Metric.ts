@@ -10,7 +10,7 @@ export interface MetricAttributes {
   unit: string;
   description?: string;
   script: string;
-  userId?: string;
+  userId?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -25,7 +25,7 @@ export class OrmMetric
   declare unit: string;
   declare description?: string;
   declare script: string;
-  declare userId?: string;
+  declare userId?: string | null;
   declare createdAt: Date;
   declare updatedAt: Date;
 }
@@ -86,7 +86,9 @@ export class Metric {
   unit: string;
   script: string;
   description?: string;
-  userId?: string;
+  userId?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
 
   constructor(
     id: string,
@@ -94,8 +96,10 @@ export class Metric {
     formula: string,
     unit: string,
     script: string,
+    createdAt: Date,
+    updatedAt: Date,
     description?: string,
-    userId?: string
+    userId?: string | null,
   ) {
     this.id = id;
     this.name = name;
@@ -104,6 +108,8 @@ export class Metric {
     this.script = script;
     this.description = description;
     this.userId = userId;
+    this.createdAt = createdAt;
+    this.updatedAt = updatedAt;
   }
 }
 
