@@ -21,10 +21,20 @@ import { app } from "../app";
 import sequelize from "../DataProviders/dataBase/VariamosORM";
 import { migrate } from "../DataProviders/dataBase/migrate";
 import { Config } from "../Config";
-import { checkContract } from "../test-support/contract";
+import { checkContract, documentedOperations } from "../test-support/contract";
+import { LABORATORY_ACCESS_PERMISSION } from "./laboratoryAccess";
 
 const SCHEMA = Config.DB.SCHEMA;
-const user = { id: "user-carol", name: "Carol", user: "carol", email: "carol@example.org", roles: ["Researcher"] };
+const user = {
+  id: "user-carol",
+  name: "Carol",
+  user: "carol",
+  email: "carol@example.org",
+  roles: ["Researcher"],
+  permissions: [LABORATORY_ACCESS_PERMISSION],
+};
+// Other permissions, even the Administrator role, do not open the Laboratory
+const outsider = { ...user, roles: ["Administrator"], permissions: ["admin::projects::query"] };
 
 /** A token signed like the Administration module signs them. */
 async function tokenFor(sessionUser = user, expiresInSeconds?: number) {
@@ -97,5 +107,43 @@ describe("VariaMos session (LAB-NF-05)", () => {
 
     expect(created.status).toBe(201);
     expect(created.body).toMatchObject({ userRole: "owner", author: "Carol" });
+  });
+});
+
+describe("Laboratory permission", () => {
+  const countExperiments = async () =>
+    Number(((await sequelize.query(`SELECT count(*) AS n FROM ${SCHEMA}.experiment`)) as any)[0][0].n);
+
+  test("an account without laboratory::access is refused on every route but /health", async () => {
+    const token = await tokenFor(outsider);
+    const refused: string[] = [];
+
+    for (const operation of documentedOperations()) {
+      const [method, template] = operation.split(" ");
+      if (template === "/health") continue;
+      const url = template.replace(/\{[^}]+\}/g, "00000000-0000-4000-8000-000000000000");
+      const response = await (request(app) as any)[method](url).set("Authorization", `Bearer ${token}`);
+      if (response.status === 403) checkContract(method, url, response.status, response.body);
+      else refused.push(`${operation} answered ${response.status}`);
+    }
+
+    expect(refused).toEqual([]);
+  });
+
+  test("the refusal comes before any work", async () => {
+    const before = await countExperiments();
+
+    const response = await request(app)
+      .post("/experiments")
+      .set("Authorization", `Bearer ${await tokenFor(outsider)}`)
+      .send({ name: "Not allowed", projectId: "project-carol" });
+
+    expect(response.status).toBe(403);
+    expect(response.body).toMatchObject({ errorCode: 403 });
+    expect(await countExperiments()).toBe(before);
+  });
+
+  test("/health stays open without a session", async () => {
+    expect((await request(app).get("/health")).status).toBe(200);
   });
 });

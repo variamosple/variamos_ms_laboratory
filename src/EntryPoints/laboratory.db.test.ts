@@ -4,7 +4,7 @@ import request from "supertest";
 
 // The signed-in user is given by the x-test-user header.
 jest.mock("@variamosple/variamos-security", () => ({
-  isAuthenticated: (req: any, res: any, next: any) => {
+  hasPermissions: () => (req: any, res: any, next: any) => {
     const id = req.header("x-test-user");
     // Same body as the real middleware for a missing token
     if (!id) return res.status(401).json({ errorCode: 401, message: "Please log in." });

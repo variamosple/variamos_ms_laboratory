@@ -1,5 +1,5 @@
 import { Request, Router } from "express";
-import { isAuthenticated } from "@variamosple/variamos-security";
+import { hasLaboratoryAccess } from "./laboratoryAccess";
 import RunUseCase from "../Domain/Laboratory/RunUseCase";
 import { ExportFormat } from "../Domain/Results/results";
 import { ValidationError } from "../Domain/Core/Entities/Errors";
@@ -18,7 +18,7 @@ const runIdsOf = (req: Request): string[] => {
 };
 
 // LAB-MT-04, LAB-VIS-01, LAB-VIS-02
-router.get("/results", isAuthenticated, async (req, res) => {
+router.get("/results", hasLaboratoryAccess, async (req, res) => {
   try {
     res.json(await runUseCase.results(req.params.id, req.user?.id!, runIdsOf(req)));
   } catch (error) {
@@ -27,7 +27,7 @@ router.get("/results", isAuthenticated, async (req, res) => {
 });
 
 // LAB-MT-05
-router.get("/export", isAuthenticated, async (req, res) => {
+router.get("/export", hasLaboratoryAccess, async (req, res) => {
   try {
     const format = String(req.query.format ?? "");
     if (!["csv", "json", "xlsx"].includes(format)) {
@@ -44,7 +44,7 @@ router.get("/export", isAuthenticated, async (req, res) => {
 });
 
 // LAB-MT-06
-router.get("/benchmark", isAuthenticated, async (req, res) => {
+router.get("/benchmark", hasLaboratoryAccess, async (req, res) => {
   try {
     res.json(await runUseCase.benchmark(req.params.id, req.user?.id!, runIdsOf(req)));
   } catch (error) {

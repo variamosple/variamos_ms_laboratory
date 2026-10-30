@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { isAuthenticated } from "@variamosple/variamos-security";
+import { hasLaboratoryAccess } from "./laboratoryAccess";
 import CommentRepository from "../DataProviders/repository/Laboratory/CommentRepository";
 import { sendError } from "./sendError";
 
@@ -9,7 +9,7 @@ const comments = new CommentRepository();
 
 export const COMMENTS_ROUTE = "/experiments/:id/comments";
 
-router.get("/", isAuthenticated, async (req, res) => {
+router.get("/", hasLaboratoryAccess, async (req, res) => {
   try {
     res.json(await comments.list(req.params.id, req.user?.id!));
   } catch (error) {
@@ -17,7 +17,7 @@ router.get("/", isAuthenticated, async (req, res) => {
   }
 });
 
-router.post("/", isAuthenticated, async (req, res) => {
+router.post("/", hasLaboratoryAccess, async (req, res) => {
   try {
     res.status(201).json(await comments.add(req.params.id, req.body ?? {}, req.user?.id!));
   } catch (error) {
@@ -25,7 +25,7 @@ router.post("/", isAuthenticated, async (req, res) => {
   }
 });
 
-router.put("/:commentId", isAuthenticated, async (req, res) => {
+router.put("/:commentId", hasLaboratoryAccess, async (req, res) => {
   try {
     res.json(await comments.edit(req.params.id, req.params.commentId, req.body ?? {}, req.user?.id!));
   } catch (error) {
@@ -33,7 +33,7 @@ router.put("/:commentId", isAuthenticated, async (req, res) => {
   }
 });
 
-router.delete("/:commentId", isAuthenticated, async (req, res) => {
+router.delete("/:commentId", hasLaboratoryAccess, async (req, res) => {
   try {
     res.json(await comments.remove(req.params.id, req.params.commentId, req.user?.id!));
   } catch (error) {

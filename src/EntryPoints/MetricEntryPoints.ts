@@ -1,6 +1,6 @@
 import { Router } from "express";
 import MetricUseCase from "../Domain/Laboratory/MetricUseCase";
-import { isAuthenticated } from "@variamosple/variamos-security";
+import { hasLaboratoryAccess } from "./laboratoryAccess";
 import { sendError } from "./sendError";
 
 const router = Router();
@@ -8,7 +8,7 @@ const metricUseCase = new MetricUseCase();
 
 export const METRICS_ROUTE = "/metrics";
 
-router.get("/public", isAuthenticated, async (req, res) => {
+router.get("/public", hasLaboratoryAccess, async (req, res) => {
     try {
         res.json(await metricUseCase.getPublicMetrics());
     } catch (error) {
@@ -16,7 +16,7 @@ router.get("/public", isAuthenticated, async (req, res) => {
     }
 });
 
-router.get("/user", isAuthenticated, async (req, res) => {
+router.get("/user", hasLaboratoryAccess, async (req, res) => {
     try {
         res.json(await metricUseCase.getMetricsByUserId(req.user?.id!));
     } catch (error) {
@@ -24,7 +24,7 @@ router.get("/user", isAuthenticated, async (req, res) => {
     }
 });
 
-router.get("/:id", isAuthenticated, async (req, res) => {
+router.get("/:id", hasLaboratoryAccess, async (req, res) => {
     try {
         res.json(await metricUseCase.getMetricById(req.params.id, req.user?.id!));
     } catch (error) {
@@ -32,7 +32,7 @@ router.get("/:id", isAuthenticated, async (req, res) => {
     }
 });
 
-router.post("/", isAuthenticated, async (req, res) => {
+router.post("/", hasLaboratoryAccess, async (req, res) => {
     try {
         res.status(201).json(await metricUseCase.createMetric(req.body, req.user?.id!));
     } catch (error) {
@@ -41,7 +41,7 @@ router.post("/", isAuthenticated, async (req, res) => {
 });
 
 /** Body: a list of metric ids, or of metrics with an id. Registered before /:id. */
-router.post("/publish", isAuthenticated, async (req, res) => {
+router.post("/publish", hasLaboratoryAccess, async (req, res) => {
     try {
         const items: unknown[] = Array.isArray(req.body) ? req.body : req.body?.metricIds ?? [];
         const metricIds = items
@@ -55,7 +55,7 @@ router.post("/publish", isAuthenticated, async (req, res) => {
     }
 });
 
-router.put("/:id", isAuthenticated, async (req, res) => {
+router.put("/:id", hasLaboratoryAccess, async (req, res) => {
     try {
         res.json(await metricUseCase.updateMetric(req.params.id, req.body, req.user?.id!));
     } catch (error) {
@@ -63,7 +63,7 @@ router.put("/:id", isAuthenticated, async (req, res) => {
     }
 });
 
-router.delete("/:id", isAuthenticated, async (req, res) => {
+router.delete("/:id", hasLaboratoryAccess, async (req, res) => {
     try {
         await metricUseCase.deleteMetric(req.params.id, req.user?.id!);
         res.status(204).send();
