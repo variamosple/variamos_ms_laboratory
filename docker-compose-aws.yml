@@ -43,7 +43,7 @@ services:
     container_name: variamos_ms_laboratory_aws
     hostname: variamos_ms_laboratory
     ports:
-      - 6000:4000
+      - 8002:8002
     networks:
       - variamosnet_aws
     environment:
@@ -59,7 +59,7 @@ services:
     container_name: variamoslaboratory_aws
     hostname: variamoslaboratory
     ports:
-      - 4000:3000
+      - 8009:3000
     networks:
       - variamosnet_aws
     environment:

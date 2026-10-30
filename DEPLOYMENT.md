@@ -22,7 +22,7 @@ Nothing has been deployed yet: the first target is the team's test environment, 
 
 | Setting | Needed | Note |
 |---|---|---|
-| `PORT` | 4000 | |
+| `PORT` | 8002 | free on every platform host: 8000, 8001 and 8003 to 8007 are taken (DevOps compose files) |
 | `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USER`, `DB_PASSWORD` | yes | given at run time, never in the image (`.dockerignore`) |
 | `DB_SCHEMA` | `variamos_laboratory` | |
 | `DB_SSL` | `true` | `false` only for a local database without TLS; any other value stops the service |

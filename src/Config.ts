@@ -33,7 +33,8 @@ export function choice<T extends string>(name: string, fallback: T, allowed: rea
 export const Config = {
     NODE_ENV: process.env.NODE_ENV || 'development',
     HOST: process.env.HOST || '127.0.0.1',
-    PORT: process.env.PORT || 4000,
+    // Free on every platform host (DevOps compose and nginx files, 2026-10-30); 4000 is the Administration module's
+    PORT: process.env.PORT || 8002,
     // Recorded in the provenance of each run (LAB-RP-02)
     VERSION: JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8")).version as string,
     DB: {
