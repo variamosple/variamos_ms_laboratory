@@ -1,0 +1,19 @@
+name: variamos-laboratory-tests
+
+# PostgreSQL for the integration tests (npm run test:db).
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: laboratory_test
+      POSTGRES_USER: lab_test
+      POSTGRES_PASSWORD: local_test_only
+    ports:
+      - "127.0.0.1:55433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lab_test -d laboratory_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 30

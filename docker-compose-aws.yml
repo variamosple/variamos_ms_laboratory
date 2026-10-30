@@ -1,0 +1,77 @@
+# Use postgres/example user/password credentials
+version: '3.1'
+
+services: 
+
+  dbaws:
+    image: postgres:14.8
+    container_name: variamos_db_aws
+    hostname: variamos_db
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: ${VARIAMOS_MS_LABORATORY_DB_PASSWORD}
+      POSTGRES_USER: ${VARIAMOS_MS_LABORATORY_DB_USER}
+      POSTGRES_SSL: ${VARIAMOS_MS_LABORATORY_DB_SSL}
+    ports:
+      - "5433:${VARIAMOS_MS_LABORATORY_DB_PORT}"
+    volumes:
+      - variamos_pgdata_aws:/var/lib/postgresql/variamosdata148
+    networks:
+      - variamosnet_aws
+
+  admineraws:
+    image: adminer
+    container_name: variamos_pgadmin_aws
+    hostname: variamos_pgadmin
+    restart: always
+    ports:
+      - 8080:8080
+    networks:
+      - variamosnet_aws
+
+  variamospleaws:
+    image: jasotov/variamosple:latest
+    container_name: variamosple_aws
+    hostname: variamosple
+    ports:
+      - 8000:3000
+    networks:
+      - variamosnet_aws
+
+  variamosmslaboratoryaws:
+    image: jasotov/variamos_ms_laboratory:latest
+    container_name: variamos_ms_laboratory_aws
+    hostname: variamos_ms_laboratory
+    ports:
+      - 6000:4000
+    networks:
+      - variamosnet_aws
+    environment:
+      - DB_HOST=${VARIAMOS_MS_LABORATORY_DB_HOST}
+      - DB_DATABASE=${VARIAMOS_MS_LABORATORY_DB_DATABASE} 
+      - DB_PORT=${VARIAMOS_MS_LABORATORY_DB_PORT}
+      - DB_SSL=${VARIAMOS_MS_LABORATORY_DB_SSL}
+      - DB_USER=${VARIAMOS_MS_LABORATORY_DB_USER}
+      - DB_PASSWORD=${VARIAMOS_MS_LABORATORY_DB_PASSWORD}
+
+  variamoslaboratoryaws:
+    image: jasotov/variamoslaboratory_aws:latest
+    container_name: variamoslaboratory_aws
+    hostname: variamoslaboratory
+    ports:
+      - 4000:3000
+    networks:
+      - variamosnet_aws
+    environment:
+      - DB_HOST=${VARIAMOS_MS_LABORATORY_DB_HOST}
+      - DB_DATABASE=${VARIAMOS_MS_LABORATORY_DB_DATABASE} 
+      - DB_PORT=${VARIAMOS_MS_LABORATORY_DB_PORT}
+      - DB_SSL=${VARIAMOS_MS_LABORATORY_DB_SSL}
+      - DB_USER=${VARIAMOS_MS_LABORATORY_DB_USER}
+      - DB_PASSWORD=${VARIAMOS_MS_LABORATORY_DB_PASSWORD}
+
+networks:
+  variamosnet_aws:
+  
+volumes:
+  variamos_pgdata_aws:

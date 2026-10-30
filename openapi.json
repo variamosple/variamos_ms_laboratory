@@ -1,0 +1,5236 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "VariaMos Laboratory API",
+    "version": "0.1.0",
+    "description": "Contract of variamos_ms_laboratory. Requirement IDs refer to the March 2026 specification. Checked by the integration tests (src/EntryPoints/*.db.test.ts)."
+  },
+  "security": [
+    {
+      "session": []
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Service and database check",
+        "responses": {
+          "200": {
+            "description": "Up",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status",
+                    "gateways"
+                  ],
+                  "properties": {
+                    "status": {
+                      "const": "ok"
+                    },
+                    "gateways": {
+                      "type": "object",
+                      "required": [
+                        "reasoning",
+                        "notifications"
+                      ],
+                      "description": "The implementation behind each gateway (LAB_REASONING_GATEWAY, LAB_NOTIFICATION_GATEWAY). With mock, results are simulated.",
+                      "properties": {
+                        "reasoning": {
+                          "enum": [
+                            "mock"
+                          ]
+                        },
+                        "notifications": {
+                          "enum": [
+                            "mock"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "const": "unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/experiments": {
+      "get": {
+        "summary": "List the user's own experiments (owner)",
+        "responses": {
+          "200": {
+            "description": "Page of experiments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedExperiments"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageNumber",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "description": "Only the experiments of this project (LAB-EX-01).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "researcher",
+            "in": "query",
+            "description": "Owner name or e-mail contains (LAB-COL-04)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "createdFrom",
+            "in": "query",
+            "description": "Created on or after this date",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "createdTo",
+            "in": "query",
+            "description": "Created on or before this date",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "experiment",
+                "template",
+                "benchmark"
+              ]
+            }
+          }
+        ],
+        "tags": [
+          "experiments"
+        ]
+      },
+      "post": {
+        "summary": "Create an experiment, always a Draft owned by the user (LAB-EX-01)",
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentDetailed"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No access to the project (LAB-EX-01)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExperimentInput"
+              }
+            }
+          }
+        },
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
+    "/experiments/shared": {
+      "get": {
+        "summary": "List experiments shared with the user, with their permissions (LAB-COL-01)",
+        "responses": {
+          "200": {
+            "description": "Page of experiments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedExperiments"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageNumber",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "description": "Only the experiments of this project (LAB-EX-01).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "researcher",
+            "in": "query",
+            "description": "Owner name or e-mail contains (LAB-COL-04)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "createdFrom",
+            "in": "query",
+            "description": "Created on or after this date",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "createdTo",
+            "in": "query",
+            "description": "Created on or before this date",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "experiment",
+                "template",
+                "benchmark"
+              ]
+            }
+          }
+        ],
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
+    "/experiments/groups": {
+      "get": {
+        "summary": "List experiments the user directs",
+        "responses": {
+          "200": {
+            "description": "Page of experiments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedExperiments"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageNumber",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "description": "Only the experiments of this project (LAB-EX-01).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "researcher",
+            "in": "query",
+            "description": "Owner name or e-mail contains (LAB-COL-04)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "createdFrom",
+            "in": "query",
+            "description": "Created on or after this date",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "createdTo",
+            "in": "query",
+            "description": "Created on or before this date",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "experiment",
+                "template",
+                "benchmark"
+              ]
+            }
+          }
+        ],
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
+    "/experiments/templates": {
+      "get": {
+        "summary": "List templates, readable by everyone (LAB-CF-05)",
+        "responses": {
+          "200": {
+            "description": "Page of experiments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedExperiments"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageNumber",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "description": "Only the experiments of this project (LAB-EX-01).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "researcher",
+            "in": "query",
+            "description": "Owner name or e-mail contains (LAB-COL-04)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "createdFrom",
+            "in": "query",
+            "description": "Created on or after this date",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "createdTo",
+            "in": "query",
+            "description": "Created on or before this date",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "experiment",
+                "template",
+                "benchmark"
+              ]
+            }
+          }
+        ],
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
+    "/experiments/benchmarks": {
+      "get": {
+        "summary": "List benchmarks, readable by everyone",
+        "responses": {
+          "200": {
+            "description": "Page of experiments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedExperiments"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageNumber",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "description": "Only the experiments of this project (LAB-EX-01).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "researcher",
+            "in": "query",
+            "description": "Owner name or e-mail contains (LAB-COL-04)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "createdFrom",
+            "in": "query",
+            "description": "Created on or after this date",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "createdTo",
+            "in": "query",
+            "description": "Created on or before this date",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "experiment",
+                "template",
+                "benchmark"
+              ]
+            }
+          }
+        ],
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
+    "/experiments/archived": {
+      "get": {
+        "summary": "List archived experiments the user manages (LAB-EX-06)",
+        "responses": {
+          "200": {
+            "description": "Page of experiments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedExperiments"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageNumber",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "description": "Only the experiments of this project (LAB-EX-01).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "researcher",
+            "in": "query",
+            "description": "Owner name or e-mail contains (LAB-COL-04)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "createdFrom",
+            "in": "query",
+            "description": "Created on or after this date",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "createdTo",
+            "in": "query",
+            "description": "Created on or before this date",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "experiment",
+                "template",
+                "benchmark"
+              ]
+            }
+          }
+        ],
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
+    "/experiments/{id}/detailed": {
+      "get": {
+        "summary": "Experiment with scenarios and metrics",
+        "responses": {
+          "200": {
+            "description": "Experiment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentDetailed"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
+    "/experiments/{id}": {
+      "put": {
+        "summary": "Save a change as a new version (LAB-EX-03, LAB-EX-04); a Ready or finished experiment goes back to Draft",
+        "responses": {
+          "200": {
+            "description": "Saved experiment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentDetailed"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not allowed in the current state (LAB-EX-03), or saved by someone else since `expectedVersion`: `details` lists their changes (LAB-COL-02)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExperimentInput"
+              }
+            }
+          }
+        },
+        "tags": [
+          "experiments"
+        ]
+      },
+      "delete": {
+        "summary": "Logical deletion; an experiment with completed executions is archived instead (LAB-EX-05)",
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "result",
+                    "message"
+                  ],
+                  "properties": {
+                    "result": {
+                      "enum": [
+                        "deleted",
+                        "archived"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not allowed in the current state (LAB-EX-03, LAB-EX-07)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
+    "/experiments/{id}/ready": {
+      "put": {
+        "summary": "Draft -> Ready: validates the configuration and pins every input model (LAB-EX-07, LAB-RUN-01, LAB-R-03)",
+        "responses": {
+          "200": {
+            "description": "Ready experiment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentDetailed"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not ready: `details` lists the problems",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not allowed in the current state (LAB-EX-03, LAB-EX-07)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
+    "/experiments/{id}/archive": {
+      "put": {
+        "summary": "Archive (LAB-EX-06)",
+        "responses": {
+          "200": {
+            "description": "Archived experiment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentDetailed"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not allowed in the current state (LAB-EX-03, LAB-EX-07)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
+    "/experiments/{id}/restore": {
+      "put": {
+        "summary": "Restore an archived experiment to its previous state (LAB-EX-06)",
+        "responses": {
+          "200": {
+            "description": "Restored experiment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentDetailed"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not allowed in the current state (LAB-EX-03, LAB-EX-07)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
+    "/experiments/{id}/share": {
+      "post": {
+        "summary": "Share with read, write and execute given separately, or as editor or viewer (LAB-COL-01)",
+        "responses": {
+          "200": {
+            "description": "Shared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "const": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not allowed in the current state (LAB-EX-03, LAB-EX-07)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "userEmail"
+                ],
+                "description": "LAB-COL-01: give `permissions` (write and execute separately; read always), or a role: editor writes and executes, viewer reads.",
+                "properties": {
+                  "userEmail": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "enum": [
+                      "editor",
+                      "viewer"
+                    ]
+                  },
+                  "permissions": {
+                    "type": "object",
+                    "properties": {
+                      "write": {
+                        "type": "boolean"
+                      },
+                      "execute": {
+                        "type": "boolean"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
+    "/experiments/{id}/copy": {
+      "post": {
+        "summary": "Clone as a new Draft that records its origin (LAB-EX-02)",
+        "responses": {
+          "201": {
+            "description": "Clone",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentDetailed"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No project given and no access to the project of the original",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "experiments"
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "description": "Project of the copy; by default the project of the original, if the user has access to it (LAB-EX-01)."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/experiments/{id}/publish/template": {
+      "post": {
+        "summary": "Publish as a template (owner only)",
+        "responses": {
+          "200": {
+            "description": "Published experiment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentDetailed"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
+    "/experiments/{id}/publish/benchmark": {
+      "post": {
+        "summary": "Publish as a benchmark (owner only)",
+        "responses": {
+          "200": {
+            "description": "Published experiment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentDetailed"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
+    "/experiments/{id}/history": {
+      "get": {
+        "summary": "Audit log of the experiment (LAB-NF-06)",
+        "responses": {
+          "200": {
+            "description": "Events, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HistoryEvent"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
+    "/experiments/{id}/version/{version}": {
+      "get": {
+        "summary": "A past version as saved (LAB-EX-04)",
+        "responses": {
+          "200": {
+            "description": "Version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentDetailed"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
+    "/experiments/{id}/version/{version}/restore": {
+      "post": {
+        "summary": "Save a past version as a new version (LAB-EX-04)",
+        "responses": {
+          "200": {
+            "description": "Saved experiment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentDetailed"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not allowed in the current state (LAB-EX-03, LAB-EX-07)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
+    "/experiments/{id}/collaborators": {
+      "get": {
+        "summary": "Users the experiment is shared with, and their permissions (LAB-COL-01)",
+        "responses": {
+          "200": {
+            "description": "Collaborators",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Collaborator"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
+    "/experiments/{id}/collaborators/{collaboratorId}": {
+      "delete": {
+        "summary": "Remove a collaborator",
+        "responses": {
+          "200": {
+            "description": "Removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not allowed in the current state (LAB-EX-03, LAB-EX-07)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "collaboratorId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
+    "/metrics": {
+      "post": {
+        "summary": "Create a private metric; the author is the session user (LAB-MT-02)",
+        "responses": {
+          "201": {
+            "description": "Metric",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Metric"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MetricInput"
+              }
+            }
+          }
+        },
+        "tags": [
+          "metrics"
+        ]
+      }
+    },
+    "/metrics/public": {
+      "get": {
+        "summary": "Public catalog, predefined metrics included (LAB-MT-01)",
+        "responses": {
+          "200": {
+            "description": "Metrics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Metric"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "metrics"
+        ]
+      }
+    },
+    "/metrics/user": {
+      "get": {
+        "summary": "Private metrics of the user",
+        "responses": {
+          "200": {
+            "description": "Metrics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Metric"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "metrics"
+        ]
+      }
+    },
+    "/metrics/publish": {
+      "post": {
+        "summary": "Publish own private metrics (LAB-MT-02)",
+        "responses": {
+          "200": {
+            "description": "Published",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "id"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "metrics"
+        ]
+      }
+    },
+    "/metrics/{id}": {
+      "get": {
+        "summary": "A public metric or one of the user's",
+        "responses": {
+          "200": {
+            "description": "Metric",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Metric"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "metrics"
+        ]
+      },
+      "put": {
+        "summary": "Change an own private metric",
+        "responses": {
+          "200": {
+            "description": "Metric",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Metric"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MetricInput"
+              }
+            }
+          }
+        },
+        "tags": [
+          "metrics"
+        ]
+      },
+      "delete": {
+        "summary": "Delete an own private metric not used by any experiment",
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Used by an experiment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "metrics"
+        ]
+      }
+    },
+    "/catalog/solvers": {
+      "get": {
+        "summary": "Solvers offered by the Reasoning module, with versions and parameters (LAB-CF-02)",
+        "responses": {
+          "200": {
+            "description": "Solvers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SolverDescriptor"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/experiments/{id}/runs": {
+      "post": {
+        "summary": "Start a run of a Ready experiment, in the background (LAB-RUN-01, LAB-RUN-03)",
+        "tags": [
+          "runs"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Run accepted; follow it with GET",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid configuration: `details` lists the problems",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown experiment or run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not in a state that can run (LAB-EX-07)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Runs of an experiment, newest first",
+        "tags": [
+          "runs"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Runs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Run"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown experiment or run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/experiments/{id}/runs/{runId}": {
+      "get": {
+        "summary": "A run, its provenance, scenario runs and attempts (LAB-RP-02)",
+        "tags": [
+          "runs"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown experiment or run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/experiments/{id}/runs/{runId}/cancel": {
+      "post": {
+        "summary": "Cancel a pending or running run; its solver jobs are released (LAB-RUN-04)",
+        "tags": [
+          "runs"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown experiment or run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The run is already finished",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/experiments/{id}/results": {
+      "get": {
+        "summary": "Metric values of the runs, for comparison and charts (LAB-MT-04, LAB-VIS-01, LAB-VIS-02)",
+        "tags": [
+          "results"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "runId",
+            "in": "query",
+            "required": false,
+            "description": "Runs to use (repeat); all runs when absent.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "style": "form",
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Results"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown experiment or run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/experiments/{id}/export": {
+      "get": {
+        "summary": "Results and metrics of the runs as CSV, JSON or XLSX (LAB-MT-05)",
+        "tags": [
+          "results"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "runId",
+            "in": "query",
+            "required": false,
+            "description": "Runs to use (repeat); all runs when absent.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "csv",
+                "json",
+                "xlsx"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file, as an attachment",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "exportedAt",
+                    "experiment",
+                    "metrics",
+                    "runs"
+                  ],
+                  "properties": {
+                    "exportedAt": {
+                      "type": "string"
+                    },
+                    "experiment": {
+                      "type": "object"
+                    },
+                    "metrics": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MetricDefinition"
+                      }
+                    },
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Run"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown experiment or run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/experiments/{id}/benchmark": {
+      "get": {
+        "summary": "Solvers compared on the runs of the experiment (LAB-MT-06)",
+        "tags": [
+          "results"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "runId",
+            "in": "query",
+            "required": false,
+            "description": "Runs to use (repeat); all runs when absent.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "style": "form",
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One entry per solver",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SolverBenchmark"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on this experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown experiment or run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/experiments/{id}/runs/{runId}/package": {
+      "get": {
+        "summary": "Reproducibility package of a completed run, as a ZIP file (LAB-RP-01)",
+        "tags": [
+          "reproducibility"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The package; X-Content-SHA256 gives its checksum",
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on an experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown experiment or run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The run is not completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{persistentId}": {
+      "get": {
+        "summary": "The run a persistent id leads to (LAB-RP-03)",
+        "tags": [
+          "reproducibility"
+        ],
+        "parameters": [
+          {
+            "name": "persistentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Run reference",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunReference"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on an experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown experiment or run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/compare": {
+      "get": {
+        "summary": "Runs side by side, of one experiment or several, with their differences (LAB-RP-04)",
+        "tags": [
+          "reproducibility"
+        ],
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "query",
+            "required": true,
+            "description": "Run ids or persistent ids (repeat, at least two)",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "style": "form",
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Comparison",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunComparison"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Fewer than two runs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission on an experiment (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown experiment or run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reproductions": {
+      "post": {
+        "summary": "Rebuild the experiment of a reproducibility package, Ready to run (LAB-RP-01, LAB-NF-03)",
+        "tags": [
+          "reproducibility"
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/zip": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The rebuilt experiment, and the metrics left out (private metrics of another user)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "experiment",
+                    "metricsLeftOut"
+                  ],
+                  "properties": {
+                    "experiment": {
+                      "$ref": "#/components/schemas/ExperimentDetailed"
+                    },
+                    "metricsLeftOut": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or altered package",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No access to the project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/experiments/{id}/comments": {
+      "get": {
+        "summary": "Comments and annotations of the experiment, oldest first (LAB-COL-03)",
+        "tags": [
+          "collaboration"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Comments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Comment"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown experiment or comment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Comment on the experiment, a scenario, a run or a scenario run result (LAB-COL-03)",
+        "tags": [
+          "collaboration"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommentInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Comment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Comment"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Empty comment or element not in the experiment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown experiment or comment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/experiments/{id}/comments/{commentId}": {
+      "put": {
+        "summary": "Edit one's own comment",
+        "tags": [
+          "collaboration"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "commentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommentInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Comment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Comment"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Empty comment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown experiment or comment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a comment: its author, or the owner or director",
+        "tags": [
+          "collaboration"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "commentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The comment, marked deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Comment"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No permission (LAB-NF-05)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown experiment or comment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "session": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "VariaMos session token, as a Bearer header or the authToken cookie."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "errorCode",
+          "message"
+        ],
+        "properties": {
+          "transactionId": {
+            "type": "string"
+          },
+          "errorCode": {
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Problems found, e.g. why an experiment cannot become Ready."
+          }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "Experiment": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "version",
+          "labels",
+          "status",
+          "userRole",
+          "isTemplate",
+          "isBenchmark"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hypothesis": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "request_changes",
+              "ready",
+              "running",
+              "completed",
+              "failed",
+              "cancelled",
+              "archived",
+              "deleted"
+            ]
+          },
+          "userRole": {
+            "enum": [
+              "owner",
+              "director",
+              "editor",
+              "viewer"
+            ]
+          },
+          "isTemplate": {
+            "type": "boolean"
+          },
+          "isBenchmark": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "VariaMos project of the experiment (LAB-EX-01); null for experiments created before projects were recorded."
+          },
+          "clonedFrom": {
+            "type": "object",
+            "required": [
+              "experimentId",
+              "version"
+            ],
+            "properties": {
+              "experimentId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "version": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Name of the original, when the user can read it."
+              }
+            },
+            "description": "LAB-EX-02: the experiment and version this one was cloned from."
+          },
+          "reproducedFrom": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "LAB-RP-01: persistent id of the run whose package rebuilt this experiment."
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/Permissions"
+          },
+          "ownerName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "LAB-COL-04: the researcher who created it."
+          }
+        }
+      },
+      "PagedExperiments": {
+        "type": "object",
+        "required": [
+          "transactionId",
+          "data"
+        ],
+        "properties": {
+          "transactionId": {
+            "type": "string"
+          },
+          "totalCount": {
+            "type": "integer"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Experiment"
+            }
+          }
+        }
+      },
+      "SolverSettings": {
+        "type": "object",
+        "description": "Pinned version and parameter values of one solver.",
+        "properties": {
+          "version": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        }
+      },
+      "OperationalContext": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "activeFeatures": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "inactiveFeatures": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "extraConstraints": {
+            "type": "string"
+          }
+        }
+      },
+      "Model": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "languageId": {
+            "type": "integer"
+          },
+          "elements": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "relationships": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "description": "Model from vms_projects."
+      },
+      "ScenarioModel": {
+        "type": "object",
+        "required": [
+          "modelId"
+        ],
+        "properties": {
+          "modelId": {
+            "type": "string"
+          },
+          "model": {
+            "$ref": "#/components/schemas/Model"
+          },
+          "pinned": {
+            "type": "object",
+            "required": [
+              "languageId",
+              "hash",
+              "pinnedAt",
+              "semanticsHash"
+            ],
+            "properties": {
+              "languageId": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "hash": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "pinnedAt": {
+                "type": "string"
+              },
+              "semanticsHash": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[0-9a-f]{64}$",
+                "description": "SHA-256 of the semantics of the language pinned with the model (LAB-RP-01); null when pinned before it was kept."
+              }
+            },
+            "description": "Copy of the model, and of the semantics of its language, taken when the experiment became Ready (LAB-CF-01, LAB-RP-01, LAB-R-03)."
+          }
+        }
+      },
+      "Scenario": {
+        "type": "object",
+        "required": [
+          "id",
+          "models",
+          "solverConfigs"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScenarioModel"
+            }
+          },
+          "solverConfigs": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SolverSettings"
+            }
+          },
+          "operationalContext": {
+            "$ref": "#/components/schemas/OperationalContext"
+          }
+        }
+      },
+      "ScenarioInput": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "modelIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "solverConfigs": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SolverSettings"
+            }
+          },
+          "operationalContext": {
+            "$ref": "#/components/schemas/OperationalContext"
+          }
+        }
+      },
+      "Metric": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "formula"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "formula": {
+            "type": "string"
+          },
+          "unit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "script": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "userId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Author of a private metric; null for a public one."
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "formulaOrigin": {
+            "enum": [
+              "spec",
+              "proposed",
+              null
+            ]
+          },
+          "requires": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "MetricInput": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "formula": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "script": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          }
+        }
+      },
+      "ExperimentDetailed": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Experiment"
+          },
+          {
+            "type": "object",
+            "required": [
+              "scenarios",
+              "metrics",
+              "author"
+            ],
+            "properties": {
+              "scenarios": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Scenario"
+                }
+              },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Metric"
+                }
+              },
+              "author": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "ExperimentInput": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "hypothesis": {
+            "type": "string"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "metricIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "metrics": {
+            "description": "Alternative to metricIds: metrics or ids.",
+            "type": "array"
+          },
+          "scenarios": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScenarioInput"
+            }
+          },
+          "projectId": {
+            "type": "string",
+            "description": "VariaMos project, owned by the user or shared with them (LAB-EX-01). Required on creation."
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "description": "LAB-COL-02: the version the user started editing from; a 409 lists what others saved since."
+          }
+        }
+      },
+      "HistoryEvent": {
+        "type": "object",
+        "required": [
+          "id",
+          "experimentId",
+          "userName",
+          "experimentVersion",
+          "eventType"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "experimentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scenarioId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "userName": {
+            "type": "string"
+          },
+          "experimentVersion": {
+            "type": "integer"
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "oldValue": {},
+          "newValue": {},
+          "createdAt": {
+            "type": "string"
+          }
+        }
+      },
+      "Collaborator": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "email",
+          "role",
+          "permissions"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "director",
+              "editor",
+              "viewer"
+            ]
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/Permissions"
+          }
+        }
+      },
+      "SolverParameter": {
+        "type": "object",
+        "required": [
+          "name",
+          "label",
+          "type",
+          "default"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "integer",
+              "enum"
+            ]
+          },
+          "default": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "min": {
+            "type": "number"
+          },
+          "max": {
+            "type": "number"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "value",
+                "label"
+              ],
+              "properties": {
+                "value": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "SolverDescriptor": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "versions",
+          "parameters"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SolverParameter"
+            }
+          }
+        }
+      },
+      "RunAttempt": {
+        "type": "object",
+        "required": [
+          "attempt",
+          "jobId",
+          "outcome",
+          "error",
+          "startedAt",
+          "finishedAt"
+        ],
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "jobId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "completed",
+              "failed",
+              "transient_error",
+              "cancelled",
+              "resource_limit"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          }
+        }
+      },
+      "ScenarioRun": {
+        "type": "object",
+        "description": "One solver on one scenario (LAB-CF-03).",
+        "required": [
+          "id",
+          "position",
+          "scenarioId",
+          "scenarioName",
+          "solverId",
+          "solverVersion",
+          "status",
+          "jobId",
+          "attempts",
+          "result",
+          "error",
+          "startedAt",
+          "finishedAt",
+          "attemptLog",
+          "progress",
+          "metrics"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "position": {
+            "type": "integer"
+          },
+          "scenarioId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scenarioName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "solverId": {
+            "type": "string"
+          },
+          "solverVersion": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "completed",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "jobId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Job id in the Reasoning module (LAB-RUN-03)."
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "result": {
+            "description": "As returned by the Reasoning module; the mock marks its results simulated."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attemptLog": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunAttempt"
+            },
+            "description": "Every attempt and its result (LAB-RUN-06)."
+          },
+          "progress": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricValue"
+            }
+          }
+        }
+      },
+      "RunProvenance": {
+        "type": "object",
+        "description": "What was executed, frozen when the run started (LAB-RP-02).",
+        "required": [
+          "experiment",
+          "startedBy",
+          "laboratoryVersion",
+          "reasoning",
+          "scenarios",
+          "metrics"
+        ],
+        "properties": {
+          "experiment": {
+            "type": "object",
+            "required": [
+              "id",
+              "name",
+              "version",
+              "projectId"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "projectId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "startedBy": {
+            "type": "string"
+          },
+          "laboratoryVersion": {
+            "type": "string"
+          },
+          "reasoning": {
+            "type": "object",
+            "required": [
+              "gateway"
+            ],
+            "properties": {
+              "gateway": {
+                "type": "string"
+              }
+            }
+          },
+          "scenarios": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "scenarioId",
+                "name",
+                "models",
+                "operationalContext",
+                "solvers"
+              ],
+              "properties": {
+                "scenarioId": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "models": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "modelId",
+                      "languageId",
+                      "hash",
+                      "pinnedAt"
+                    ],
+                    "properties": {
+                      "modelId": {
+                        "type": "string"
+                      },
+                      "languageId": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "hash": {
+                        "type": "string"
+                      },
+                      "pinnedAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "semanticsHash": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "Semantics pinned with the model (LAB-RP-01); absent from runs started before it was kept."
+                      }
+                    }
+                  }
+                },
+                "operationalContext": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OperationalContext"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "solvers": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "version",
+                      "parameters"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "string"
+                      },
+                      "parameters": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricDefinition"
+            }
+          }
+        }
+      },
+      "Run": {
+        "type": "object",
+        "required": [
+          "id",
+          "experimentId",
+          "number",
+          "experimentVersion",
+          "status",
+          "startedBy",
+          "failureReason",
+          "cancelledBy",
+          "cancelledAt",
+          "createdAt",
+          "startedAt",
+          "finishedAt",
+          "provenance",
+          "scenarioRuns",
+          "startedByName",
+          "cancelledByName",
+          "persistentId"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Also the job id returned to the client (LAB-RUN-03)."
+          },
+          "experimentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "experimentVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "completed",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "startedBy": {
+            "type": "string"
+          },
+          "failureReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cancelledBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cancelledAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/RunProvenance"
+          },
+          "scenarioRuns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScenarioRun"
+            }
+          },
+          "startedByName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cancelledByName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name of the user who cancelled (LAB-RUN-04)."
+          },
+          "persistentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "LAB-RP-03: VLAB-XXXX-XXXX-XXXX-XXXX, set when the run completes."
+          }
+        }
+      },
+      "MetricDefinition": {
+        "type": "object",
+        "required": [
+          "id",
+          "code",
+          "name",
+          "unit",
+          "formula",
+          "requires"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "unit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "formula": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requires": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "MetricValue": {
+        "type": "object",
+        "required": [
+          "metricId",
+          "value",
+          "reason",
+          "inputs",
+          "simulated"
+        ],
+        "properties": {
+          "metricId": {
+            "type": "string"
+          },
+          "value": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the metric could not be computed."
+          },
+          "inputs": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Figures the value was computed from."
+          },
+          "simulated": {
+            "type": "boolean",
+            "description": "An input came from a simulated Reasoning answer (mock gateway)."
+          }
+        }
+      },
+      "ResultRow": {
+        "type": "object",
+        "required": [
+          "runId",
+          "runNumber",
+          "runStatus",
+          "experimentVersion",
+          "scenarioRunId",
+          "scenarioId",
+          "scenarioName",
+          "solverId",
+          "solverVersion",
+          "scenarioRunStatus",
+          "metricId",
+          "metricCode",
+          "metricName",
+          "unit",
+          "value",
+          "reason",
+          "simulated"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "runNumber": {
+            "type": "integer"
+          },
+          "runStatus": {
+            "type": "string"
+          },
+          "experimentVersion": {
+            "type": "integer"
+          },
+          "scenarioRunId": {
+            "type": "string"
+          },
+          "scenarioId": {
+            "type": "string"
+          },
+          "scenarioName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "solverId": {
+            "type": "string"
+          },
+          "solverVersion": {
+            "type": "string"
+          },
+          "scenarioRunStatus": {
+            "type": "string"
+          },
+          "metricId": {
+            "type": "string"
+          },
+          "metricCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "metricName": {
+            "type": "string"
+          },
+          "unit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "value": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "simulated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Results": {
+        "type": "object",
+        "required": [
+          "metrics",
+          "runs",
+          "rows"
+        ],
+        "properties": {
+          "metrics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricDefinition"
+            }
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "number",
+                "status",
+                "experimentVersion",
+                "startedAt",
+                "finishedAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "number": {
+                  "type": "integer"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "experimentVersion": {
+                  "type": "integer"
+                },
+                "startedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "finishedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ResultRow"
+            }
+          }
+        }
+      },
+      "SolverBenchmark": {
+        "type": "object",
+        "required": [
+          "solverId",
+          "versions",
+          "scenarioRuns",
+          "completed",
+          "failed",
+          "cancelled",
+          "successRate",
+          "responseTimeMs",
+          "retries",
+          "agreementRate",
+          "compared"
+        ],
+        "properties": {
+          "solverId": {
+            "type": "string"
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scenarioRuns": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cancelled": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "retries": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "compared": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "successRate": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "responseTimeMs": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "mean",
+                  "median",
+                  "min",
+                  "max"
+                ],
+                "properties": {
+                  "mean": {
+                    "type": "number"
+                  },
+                  "median": {
+                    "type": "number"
+                  },
+                  "min": {
+                    "type": "number"
+                  },
+                  "max": {
+                    "type": "number"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "agreementRate": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Share of answers equal to the majority of the solvers on the same scenario and run."
+          }
+        }
+      },
+      "RunReference": {
+        "type": "object",
+        "required": [
+          "persistentId",
+          "runId",
+          "runNumber",
+          "status",
+          "finishedAt",
+          "experimentId",
+          "experimentName",
+          "experimentVersion"
+        ],
+        "properties": {
+          "persistentId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "runNumber": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "experimentId": {
+            "type": "string"
+          },
+          "experimentName": {
+            "type": "string"
+          },
+          "experimentVersion": {
+            "type": "integer"
+          }
+        }
+      },
+      "RunComparison": {
+        "type": "object",
+        "required": [
+          "runs",
+          "differences",
+          "equivalent"
+        ],
+        "properties": {
+          "runs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "runId",
+                "persistentId",
+                "number",
+                "status",
+                "experiment",
+                "finishedAt",
+                "configuration",
+                "results"
+              ],
+              "properties": {
+                "runId": {
+                  "type": "string"
+                },
+                "persistentId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "number": {
+                  "type": "integer"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "experiment": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "name",
+                    "version"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "finishedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "configuration": {
+                  "type": "object"
+                },
+                "results": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "differences": {
+            "type": "object",
+            "required": [
+              "configuration",
+              "results"
+            ],
+            "properties": {
+              "configuration": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "results": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "equivalent": {
+            "type": "boolean",
+            "description": "Same results in every run, timings apart (LAB-NF-03)."
+          }
+        }
+      },
+      "Permissions": {
+        "type": "object",
+        "required": [
+          "read",
+          "write",
+          "execute",
+          "manage"
+        ],
+        "properties": {
+          "read": {
+            "type": "boolean"
+          },
+          "write": {
+            "type": "boolean"
+          },
+          "execute": {
+            "type": "boolean"
+          },
+          "manage": {
+            "type": "boolean"
+          }
+        },
+        "description": "LAB-COL-01: what the user may do on the experiment."
+      },
+      "Comment": {
+        "type": "object",
+        "required": [
+          "id",
+          "targetType",
+          "targetId",
+          "metricId",
+          "targetLabel",
+          "body",
+          "author",
+          "authorName",
+          "createdAt",
+          "editedAt",
+          "deleted"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "targetType": {
+            "enum": [
+              "experiment",
+              "scenario",
+              "run",
+              "scenario_run"
+            ]
+          },
+          "targetId": {
+            "type": "string"
+          },
+          "metricId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "targetLabel": {
+            "type": "string"
+          },
+          "body": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Null once deleted."
+          },
+          "author": {
+            "type": "string"
+          },
+          "authorName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "editedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "deleted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CommentInput": {
+        "type": "object",
+        "properties": {
+          "targetType": {
+            "enum": [
+              "experiment",
+              "scenario",
+              "run",
+              "scenario_run"
+            ]
+          },
+          "targetId": {
+            "type": "string"
+          },
+          "metricId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 5000
+          }
+        }
+      }
+    }
+  }
+}

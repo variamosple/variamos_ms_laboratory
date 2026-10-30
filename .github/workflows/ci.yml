@@ -1,0 +1,54 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    # Same database as compose.test.yml, for the *.db.test.ts suites
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: laboratory_test
+          POSTGRES_USER: lab_test
+          POSTGRES_PASSWORD: local_test_only
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U lab_test -d laboratory_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v7
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v7
+      with:
+        node-version: 24
+        cache: 'npm'
+        cache-dependency-path: package-lock.json
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Build
+      run: npm run build
+
+    - name: Unit, HTTP, contract and isolation tests
+      run: npm test
+
+    - name: Integration tests on PostgreSQL
+      run: npm run test:db

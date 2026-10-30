@@ -1,0 +1,9 @@
+node_modules
+npm-debug.log
+dist
+# Local settings and keys stay out of the image; they are given at run time
+.env
+.env.development
+*.pem
+*.key
+*.key.pub
