@@ -5,7 +5,11 @@
   "main": "dist/Domain/Init/StartServiceUseCases.js",
   "scripts": {
     "build": "tsc",
+    "migrate": "node ./dist/DataProviders/dataBase/migrate.js",
     "test": "jest --runInBand",
+    "test:db": "jest -c jest.db.config.js --runInBand",
+    "db:test:up": "docker compose -f compose.test.yml up -d --wait",
+    "db:test:down": "docker compose -f compose.test.yml down",
     "start": "set NODE_ENV=production && node ./dist/Domain/Init/StartServiceUseCases.js",
     "prod": "set NODE_ENV=production && node ./dist/Domain/Init/StartServiceUseCases.js",
     "dev": "set NODE_ENV=development && node ./dist/Domain/Init/StartServiceUseCases.js",

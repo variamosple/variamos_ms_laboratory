@@ -7,8 +7,9 @@ const sequelizeVariamos = new Sequelize(
   Config.DB.PASSWORD,
   {
     host: Config.DB.HOST,
-    port: Number(Config.DB.PORT), // <-- il manque
+    port: Number(Config.DB.PORT),
     dialect: "postgres",
+    logging: false,
 
     pool: {
       max: 5,
@@ -17,7 +18,8 @@ const sequelizeVariamos = new Sequelize(
     },
 
     dialectOptions: {
-      ssl: false,
+      // DB_SSL was read but never used: the connection was never encrypted
+      ssl: Config.DB.SSL ? { require: true, rejectUnauthorized: false } : false,
     },
 
     define: {

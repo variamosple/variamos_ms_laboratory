@@ -1,5 +1,5 @@
-# FROM node:lts-bullseye-slim
-FROM node:16-alpine
+# Same base as variamos_ms_notifications; Node 16 is end of life
+FROM node:24-alpine
 
 # Arguments
 
@@ -56,4 +56,5 @@ RUN npm run build
 
 EXPOSE 4000
 
-CMD [ "npm", "start" ]
+# Apply the pending migrations, then start the service
+CMD [ "sh", "-c", "node ./dist/DataProviders/dataBase/migrate.js && node ./dist/Domain/Init/StartServiceUseCases.js" ]
