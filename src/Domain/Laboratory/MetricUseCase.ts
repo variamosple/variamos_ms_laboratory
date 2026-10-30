@@ -1,4 +1,4 @@
-import MetricRepository from "../../DataProviders/repository/Laboratory/MetricRepository";
+import MetricRepository, { MetricInput } from "../../DataProviders/repository/Laboratory/MetricRepository";
 import { Metric } from "./Entities/Metric";
 
 export default class MetricUseCase {
@@ -9,30 +9,30 @@ export default class MetricUseCase {
   }
 
   async getMetricsByUserId(userId: string): Promise<Metric[]> {
-        return  this.metricRepository.getMetricsByUserId(userId);
-    }
+    return this.metricRepository.getMetricsByUserId(userId);
+  }
 
-    async getPublicMetrics(): Promise<Metric[]> {   
-        return this.metricRepository.getPublicMetrics();
-    }
+  async getPublicMetrics(): Promise<Metric[]> {
+    return this.metricRepository.getPublicMetrics();
+  }
 
-    async getMetricById(id: string): Promise<Metric | null> {
-        return this.metricRepository.getMetricById(id);
-    }
+  async getMetricById(id: string, userId: string): Promise<Metric> {
+    return this.metricRepository.getMetricById(id, userId);
+  }
 
-    async createMetric(metricData: Metric): Promise<Metric> {
-        return this.metricRepository.createMetric(metricData);
-    }
+  async createMetric(metricData: MetricInput, userId: string): Promise<Metric> {
+    return this.metricRepository.createMetric(metricData, userId);
+  }
 
-    async updateMetric(id: string, metricData: Partial<Metric>): Promise<Metric | null> {
-        return this.metricRepository.updateMetric(id, metricData);
-    }
+  async updateMetric(id: string, metricData: MetricInput, userId: string): Promise<Metric> {
+    return this.metricRepository.updateMetric(id, metricData, userId);
+  }
 
-    async deleteMetric(id: string): Promise<boolean> {
-        return this.metricRepository.deleteMetric(id);
-    }
+  async deleteMetric(id: string, userId: string): Promise<void> {
+    return this.metricRepository.deleteMetric(id, userId);
+  }
 
-    async publishMetrics(metricsToPublish: Metric[]): Promise<void> {
-        return this.metricRepository.publishMetrics(metricsToPublish);
-    }
+  async publishMetrics(metricIds: string[], userId: string): Promise<void> {
+    return this.metricRepository.publishMetrics(metricIds, userId);
+  }
 }

@@ -30,7 +30,9 @@ export const OrmUser = sequelize.define(
     },
     user: { type: Sequelize.TEXT },
     name: { type: Sequelize.TEXT },
-    email: { type: Sequelize.TEXT } 
+    email: { type: Sequelize.TEXT },
+    isEnabled: { type: Sequelize.BOOLEAN, field: "is_enabled" },
+    isDeleted: { type: Sequelize.BOOLEAN, field: "is_deleted" },
   },
   {
     freezeTableName: true,

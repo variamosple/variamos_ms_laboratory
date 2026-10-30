@@ -1,6 +1,7 @@
 import { Router } from "express";
 import MetricUseCase from "../Domain/Laboratory/MetricUseCase";
 import { isAuthenticated } from "@variamosple/variamos-security";
+import { sendError } from "./sendError";
 
 const router = Router();
 const metricUseCase = new MetricUseCase();
@@ -9,89 +10,65 @@ export const METRICS_ROUTE = "/metrics";
 
 router.get("/public", isAuthenticated, async (req, res) => {
     try {
-        const publicMetrics = await metricUseCase.getPublicMetrics();      
-        res.json(publicMetrics);
+        res.json(await metricUseCase.getPublicMetrics());
     } catch (error) {
-        console.error("Error fetching public metrics:", error);
-        res.status(500).json({ error: "Internal Server Error" });
+        sendError(res, "getPublicMetrics", error);
     }
 });
 
 router.get("/user", isAuthenticated, async (req, res) => {
     try {
-        const userMetrics = await metricUseCase.getMetricsByUserId(req.user?.id!);
-        res.json(userMetrics);
+        res.json(await metricUseCase.getMetricsByUserId(req.user?.id!));
     } catch (error) {
-        console.error(`Error fetching metrics for user ${req.user?.id!}:`, error);
-        res.status(500).json({ error: "Internal Server Error" });
+        sendError(res, "getUserMetrics", error);
     }
 });
 
 router.get("/:id", isAuthenticated, async (req, res) => {
-    const { id } = req.params;
     try {
-        const metric = await metricUseCase.getMetricById(id);
-        if (!metric) {
-            res.status(404).json({ error: "Metric not found" });
-            return;
-        }
-        res.json(metric);
+        res.json(await metricUseCase.getMetricById(req.params.id, req.user?.id!));
     } catch (error) {
-        console.error(`Error fetching metric with ID ${id}:`, error);
-        res.status(500).json({ error: "Internal Server Error" });
+        sendError(res, "getMetric", error);
     }
 });
 
 router.post("/", isAuthenticated, async (req, res) => {
-    const metricData = req.body;
     try {
-        const newMetric = await metricUseCase.createMetric(metricData);
-        res.status(201).json(newMetric);
+        res.status(201).json(await metricUseCase.createMetric(req.body, req.user?.id!));
     } catch (error) {
-        console.error("Error creating metric:", error);
-        res.status(500).json({ error: "Internal Server Error" });
+        sendError(res, "createMetric", error);
+    }
+});
+
+/** Body: a list of metric ids, or of metrics with an id. Registered before /:id. */
+router.post("/publish", isAuthenticated, async (req, res) => {
+    try {
+        const items: unknown[] = Array.isArray(req.body) ? req.body : req.body?.metricIds ?? [];
+        const metricIds = items
+            .map((item: any) => (typeof item === "string" ? item : item?.id))
+            .filter((id): id is string => typeof id === "string");
+
+        await metricUseCase.publishMetrics(metricIds, req.user?.id!);
+        res.status(200).json({ message: "Metrics published successfully" });
+    } catch (error) {
+        sendError(res, "publishMetrics", error);
     }
 });
 
 router.put("/:id", isAuthenticated, async (req, res) => {
-    const { id } = req.params;
-    const metricData = req.body;
     try {
-        const updatedMetric = await metricUseCase.updateMetric(id, metricData);
-        if (!updatedMetric) {
-            res.status(404).json({ error: "Metric not found" });
-            return;
-        }
-        res.json(updatedMetric);
+        res.json(await metricUseCase.updateMetric(req.params.id, req.body, req.user?.id!));
     } catch (error) {
-        console.error(`Error updating metric with ID ${id}:`, error);
-        res.status(500).json({ error: "Internal Server Error" });
+        sendError(res, "updateMetric", error);
     }
 });
 
 router.delete("/:id", isAuthenticated, async (req, res) => {
-    const { id } = req.params;
     try {
-        const deleted = await metricUseCase.deleteMetric(id);
-        if (!deleted) {
-            res.status(404).json({ error: "Metric not found" });
-            return;
-        }
+        await metricUseCase.deleteMetric(req.params.id, req.user?.id!);
         res.status(204).send();
     } catch (error) {
-        console.error(`Error deleting metric with ID ${id}:`, error);
-        res.status(500).json({ error: "Internal Server Error" });
-    }
-});
-
-router.post("/publish", isAuthenticated, async (req, res) => {
-    const metricsToPublish = req.body;
-    try {
-        await metricUseCase.publishMetrics(metricsToPublish);
-        res.status(200).json({ message: "Metrics published successfully" });
-    } catch (error) {
-        console.error("Error publishing metrics:", error);
-        res.status(500).json({ error: "Internal Server Error" });
+        sendError(res, "deleteMetric", error);
     }
 });
 

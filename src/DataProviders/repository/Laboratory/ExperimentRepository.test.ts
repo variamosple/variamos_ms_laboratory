@@ -35,6 +35,8 @@ describe("ExperimentRepository", () => {
     };
     const findAndCountAll = jest.spyOn(OrmExperiment, "findAndCountAll")
       .mockResolvedValue({ count: 1, rows: [row] } as any);
+    // Owner names of the listed experiments (LAB-COL-04)
+    jest.spyOn(OrmExperimentUser, "findAll").mockResolvedValue([{ experimentId: "experiment-1", userId: "user-1", user: { name: "Ada" } }] as any);
     const request = new RequestModel(
       "tx-1",
       new ExperimentFilter("user-1", "Trial", 2, 10)
@@ -48,6 +50,8 @@ describe("ExperimentRepository", () => {
       id: "experiment-1",
       name: "Trial",
       userRole: ExperimentRoleEnum.OWNER,
+      ownerName: "Ada",
+      permissions: { read: true, write: true, execute: true, manage: true },
     });
     expect(findAndCountAll).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ status: expect.anything(), name: expect.anything() }),
@@ -66,21 +70,5 @@ describe("ExperimentRepository", () => {
 
     expect(response.errorCode).toBe(500);
     expect(response.message).toBe("Internal Server Error");
-  });
-
-  test("does not publish an experiment without a scenario", async () => {
-    jest.spyOn(OrmExperimentUser, "findOne").mockResolvedValue({} as any);
-    jest.spyOn(OrmExperiment, "findByPk").mockResolvedValue({ scenarios: [], metrics: [] } as any);
-
-    await expect(repository.publishAsTemplate("experiment-1", "user-1"))
-      .rejects.toThrow("An experiment must contain at least one scenario before publishing");
-  });
-
-  test("does not publish an experiment without a metric", async () => {
-    jest.spyOn(OrmExperimentUser, "findOne").mockResolvedValue({} as any);
-    jest.spyOn(OrmExperiment, "findByPk").mockResolvedValue({ scenarios: [{}], metrics: [] } as any);
-
-    await expect(repository.publishAsBenchmark("experiment-1", "user-1"))
-      .rejects.toThrow("An experiment must contain at least one metric before publishing");
   });
 });

@@ -1,7 +1,10 @@
-import { Op, WhereOptions } from "sequelize";
+import { randomUUID } from "crypto";
+import { modelHash } from "../../../Domain/Core/canonicalJson";
+import { Op, Transaction, WhereOptions, literal } from "sequelize";
 import sequelize from "../../../DataProviders/dataBase/VariamosORM";
+import { Config } from "../../../Config";
 
-import { Experiment, OrmExperiment, ExperimentDetailed } from "../../../Domain/Laboratory/Entities/Experiment";
+import { Experiment, OrmExperiment, ExperimentDetailed, ExperimentStatus } from "../../../Domain/Laboratory/Entities/Experiment";
 import { ExperimentRoleEnum, OrmExperimentUser, Collaborator } from "../../../Domain/Laboratory/Entities/ExperimentUser";
 import { OrmScenario, Scenario } from "../../../Domain/Laboratory/Entities/Scenario";
 import { OrmMetric, Metric } from "../../../Domain/Laboratory/Entities/Metric";
@@ -11,10 +14,97 @@ import { ResponseModel } from "../../../Domain/Core/Entities/ResponseModel";
 import { OrmExperimentMetric } from "../../../Domain/Laboratory/Entities/ExperimentMetric";
 import { OrmUser } from "../../../Domain/Session/Entities/User";
 import { ModelEntity, OrmModel } from "../../../Domain/ProductLineEngineering/Entities/Model";
-import { Transaction } from "sequelize";
-import { OrmExperimentHistory, ExperimentHistoryCreationAttributes } from "../../../Domain/Laboratory/Entities/ExperimentHistory";
-import { ExperimentHistory } from "../../../Domain/Laboratory/Entities/ExperimentHistory";
+import { OrmProject, OrmUserProject } from "../../../Domain/ProductLineEngineering/Entities/Project";
+import { OrmLanguage } from "../../../Domain/ProductLineEngineering/Entities/Language";
+import { OrmScenarioModel } from "../../../Domain/Laboratory/Entities/ScenarioModel";
+import { OrmRun } from "../../../Domain/Laboratory/Entities/Run";
+import { getNotificationGateway } from "../../../Domain/Notifications/NotificationGateway";
+import { getReasoningGateway } from "../../../Domain/Reasoning/ReasoningGateway";
+import { OrmExperimentHistory, ExperimentHistoryCreationAttributes, ExperimentHistory } from "../../../Domain/Laboratory/Entities/ExperimentHistory";
+import { ExperimentConfigSnapshot, OrmExperimentVersion } from "../../../Domain/Laboratory/Entities/ExperimentVersion";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../../../Domain/Core/Entities/Errors";
+import {
+  MANAGE_ROLES,
+  ScenarioInput,
+  canArchive,
+  canMarkReady,
+  deleteOutcome,
+  editOutcome,
+  editRejection,
+  validateForReady,
+  featureNames,
+  Permission,
+  permissionsOf,
+  sharedRole,
+  cloneOf,
+  deleteRejection,
+} from "../../../Domain/Laboratory/ExperimentLifecycle";
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** What the interface sends to create or update an experiment. */
+export type ExperimentInput = Omit<Partial<ExperimentDetailed>, "scenarios" | "metrics"> & {
+  /**
+   * LAB-COL-02: the version the user started editing from. If someone saved
+   * since, the change is refused with what they changed, instead of being lost.
+   */
+  expectedVersion?: number;
+  metrics?: (Metric | string)[];
+  metricIds?: string[];
+  scenarios?: (ScenarioInput & {
+    /** Accepted from clients written before scenarios had several models. */
+    modelId?: string | null;
+    models?: { modelId: string }[];
+    solverConfig?: ScenarioInput["solverConfigs"];
+  })[];
+};
+
+export type DeleteResult = "deleted" | "archived";
+
+/** The editable part of a stored scenario. */
+const toScenarioInput = (scenario: Scenario): ScenarioInput & { id: string } => ({
+  id: scenario.id,
+  name: scenario.name,
+  modelIds: scenario.models.map((model) => model.modelId),
+  solverConfigs: scenario.solverConfigs,
+  operationalContext: scenario.operationalContext,
+});
+
+const featuresOf = (model: OrmModel): Set<string> => featureNames(model.model);
+
+/** One line for a change of the audit log (LAB-COL-02 conflicts and notifications). */
+const describeChange = (event: { eventType: string; oldValue?: unknown; newValue?: unknown }): string => {
+  switch (event.eventType) {
+    case "name_updated":
+      return `name changed from "${event.oldValue}" to "${event.newValue}"`;
+    case "description_updated":
+      return "description changed";
+    case "hypothesis_updated":
+      return "hypothesis changed";
+    case "labels_updated":
+      return "labels changed";
+    case "project_updated":
+      return "moved to another project";
+    case "metrics_updated":
+      return "metrics changed";
+    case "scenario_added":
+      return `scenario "${(event.newValue as any)?.name ?? ""}" added`;
+    case "scenario_removed":
+      return `scenario "${(event.oldValue as any)?.name ?? ""}" removed`;
+    case "scenario_model_updated":
+      return "models of a scenario changed";
+    case "scenario_solver_config_updated":
+      return "solver settings of a scenario changed";
+    case "scenario_updated":
+      return "name or operational context of a scenario changed";
+    case "status_changed":
+      return `status changed to ${event.newValue}`;
+    case "version_restored":
+      return `version ${(event.newValue as any)?.version} restored`;
+    default:
+      return event.eventType.replace(/_/g, " ");
+  }
+};
 
 export default class ExperimentRepository {
 
@@ -34,8 +124,9 @@ export default class ExperimentRepository {
       const pageNumber = filter.pageNumber ?? undefined;
 
       const result = await OrmExperiment.findAndCountAll({
-        where,
+        where: { ...where, deletedAt: null },
         include,
+        distinct: true,
         order: [["name", "ASC"]],
         limit: pageSize,
         offset:
@@ -46,23 +137,19 @@ export default class ExperimentRepository {
 
       response.totalCount = result.count;
 
+      const originNames = await this.originNames(result.rows, userId);
+      const owners = await this.ownerNames(result.rows.map((row) => row.id));
       response.data = result.rows.map((row) => {
-      const userRole = row.users?.find((user) => user.userId === userId)?.role ?? "viewer";
-      return new Experiment(
-          row.id,
-          row.name,
-          row.version,
-          row.labels ?? [],
-          row.status,
-          userRole,
-          row.isTemplate,
-          row.isBenchmark,
-          row.description,
-          row.hypothesis,
-          row.createdAt,
-          row.updatedAt
-      );
-  });
+        const access = row.users?.find((user) => user.userId === userId);
+        const userRole = access?.role ?? "viewer";
+        const experiment = this.toExperiment(row, userRole);
+        experiment.permissions = access?.role
+          ? permissionsOf({ role: access.role, canWrite: access.canWrite, canExecute: access.canExecute })
+          : { read: true, write: false, execute: false, manage: false };
+        if (experiment.clonedFrom) experiment.clonedFrom.name = originNames.get(experiment.clonedFrom.experimentId) ?? null;
+        experiment.ownerName = owners.get(row.id) ?? null;
+        return experiment;
+      });
 
     } catch (error) {
       console.error("ExperimentRepository error:", error);
@@ -72,8 +159,99 @@ export default class ExperimentRepository {
     return response;
   }
 
+  private toExperiment(row: OrmExperiment, userRole: string): Experiment {
+    const experiment = new Experiment(
+      row.id,
+      row.name,
+      row.version,
+      row.labels ?? [],
+      row.status,
+      userRole,
+      row.isTemplate,
+      row.isBenchmark,
+      row.description,
+      row.hypothesis,
+      row.createdAt,
+      row.updatedAt
+    );
+    experiment.projectId = row.projectId ?? null;
+    if (row.clonedFromExperimentId) {
+      experiment.clonedFrom = { experimentId: row.clonedFromExperimentId, version: row.clonedFromVersion ?? null };
+    }
+    return experiment;
+  }
+
+  /** LAB-COL-04: the researcher who created each experiment of a list. */
+  private async ownerNames(experimentIds: string[]): Promise<Map<string, string>> {
+    if (experimentIds.length === 0) return new Map();
+    const owners = await OrmExperimentUser.findAll({
+      where: { experimentId: experimentIds, role: ExperimentRoleEnum.OWNER },
+      include: [{ model: OrmUser, as: "user", attributes: ["name"] }],
+    });
+    return new Map(owners.map((owner: any) => [owner.experimentId, owner.user?.name ?? owner.userId]));
+  }
+
+  /**
+   * LAB-EX-02: names of the originals of cloned experiments, shown in the lists.
+   * Only names the user may read: templates, benchmarks, or experiments shared with them.
+   */
+  private async originNames(rows: { clonedFromExperimentId?: string | null }[], userId: string): Promise<Map<string, string>> {
+    const ids = [...new Set(rows.map((row) => row.clonedFromExperimentId).filter((id): id is string => !!id))];
+    if (ids.length === 0) return new Map();
+
+    const originals = await OrmExperiment.findAll({ where: { id: ids }, attributes: ["id", "name", "isTemplate", "isBenchmark"] });
+    const readable = new Set(
+      (await OrmExperimentUser.findAll({ where: { experimentId: ids, userId }, attributes: ["experimentId"] })).map((row) => row.experimentId)
+    );
+    return new Map(
+      originals
+        .filter((original) => original.isTemplate || original.isBenchmark || readable.has(original.id))
+        .map((original) => [original.id, original.name])
+    );
+  }
+
+  /**
+   * Filters of the lists: name, project (LAB-EX-01), and for the consolidated
+   * view (LAB-COL-04) researcher, status, creation date and experiment type.
+   */
   private buildNameFilter(filter: ExperimentFilter): WhereOptions {
-    const where: WhereOptions = {};
+    const where: any = {};
+
+    if (filter.status) {
+      where.status = filter.status;
+    }
+
+    if (filter.createdFrom || filter.createdTo) {
+      where.createdAt = {
+        ...(filter.createdFrom ? { [Op.gte]: new Date(filter.createdFrom) } : {}),
+        // The whole day of `createdTo`
+        ...(filter.createdTo ? { [Op.lt]: new Date(new Date(filter.createdTo).getTime() + 24 * 3600 * 1000) } : {}),
+      };
+    }
+
+    if (filter.type === "template") where.isTemplate = true;
+    if (filter.type === "benchmark") where.isBenchmark = true;
+    if (filter.type === "experiment") {
+      where.isTemplate = false;
+      where.isBenchmark = false;
+    }
+
+    if (filter.researcher) {
+      // Owner whose name or e-mail contains the text
+      const text = sequelize.escape(`%${filter.researcher}%`);
+      where[Op.and as any] = [
+        ...(where[Op.and as any] ?? []),
+        literal(
+          `"OrmExperiment"."id" IN (SELECT eu.experiment_id FROM ${Config.DB.SCHEMA}.experiment_user eu
+             JOIN variamos."user" u ON u.id = eu.user_id
+            WHERE eu.role = 'owner' AND (u.name ILIKE ${text} OR u.email ILIKE ${text}))`
+        ),
+      ];
+    }
+
+    if (filter.projectId) {
+      where.projectId = filter.projectId;
+    }
 
     if (filter.name) {
       where.name = {
@@ -100,27 +278,101 @@ export default class ExperimentRepository {
     ];
   }
 
-  private async ensureExperimentPermission(
+  /**
+   * Loads a non-deleted experiment and checks what the user may do on it
+   * (LAB-NF-05, LAB-COL-01): a permission, or a list of roles. Templates and
+   * benchmarks are readable by every user when `allowPublished` is set
+   * (LAB-CF-05). `lock` holds the row until the transaction ends, so that
+   * concurrent changes are made one after the other (LAB-COL-02).
+   */
+  async ensureExperimentPermission(
     experimentId: string,
     userId: string,
-    allowedRoles: ExperimentRoleEnum[],
-    transaction?: Transaction
-  ): Promise<void> {
-    const permission = await OrmExperimentUser.findOne({
-      where: {
-        experimentId,
-        userId,
-        role: allowedRoles,
-      },
+    required: Permission | ExperimentRoleEnum[],
+    transaction?: Transaction,
+    allowPublished = false,
+    lock = false
+  ): Promise<{ experiment: OrmExperiment; role: ExperimentRoleEnum; permissions: Record<Permission, boolean> }> {
+    if (!UUID_PATTERN.test(experimentId)) {
+      throw new NotFoundError();
+    }
+
+    const experiment = await OrmExperiment.findOne({
+      where: { id: experimentId, deletedAt: null },
+      transaction,
+      ...(lock && transaction ? { lock: transaction.LOCK.UPDATE } : {}),
+    });
+
+    if (!experiment) {
+      throw new NotFoundError();
+    }
+
+    const access = await OrmExperimentUser.findOne({
+      where: { experimentId, userId },
       transaction,
     });
 
-    if (!permission) {
-      throw new Error("You do not have permission to perform this action.");
+    const role = access?.role;
+    const permissions = permissionsOf(access && role ? { role, canWrite: access.canWrite, canExecute: access.canExecute } : null);
+    const allowed = Array.isArray(required) ? !!role && required.includes(role) : permissions[required];
+
+    if (role && allowed) {
+      return { experiment, role, permissions };
     }
+
+    if (allowPublished && (experiment.isTemplate || experiment.isBenchmark) && (required === "read" || (Array.isArray(required) && required.includes(ExperimentRoleEnum.VIEWER)))) {
+      return { experiment, role: role ?? ExperimentRoleEnum.VIEWER, permissions: { ...permissions, read: true } };
+    }
+
+    throw new ForbiddenError();
   }
 
-  private async validatePublishExperiment(id: string): Promise<OrmExperiment> {
+  /** LAB-EX-01: an experiment belongs to a VariaMos project the user owns or that is shared with them. */
+  async ensureProjectAccess(projectId: unknown, userId: string, transaction?: Transaction): Promise<string> {
+    if (typeof projectId !== "string" || projectId.trim() === "") {
+      throw new ValidationError("A project is required.");
+    }
+
+    const project = await OrmProject.findByPk(projectId, { transaction });
+    if (!project || project.isDeleted) {
+      throw new ValidationError("Unknown project.");
+    }
+
+    if (project.ownerId !== userId) {
+      const membership = await OrmUserProject.findOne({ where: { projectId, userId }, transaction });
+      if (!membership) {
+        throw new ForbiddenError("You have no access to this project.");
+      }
+    }
+
+    return projectId;
+  }
+
+  /** LAB-COL-02: what was saved after a version, by whom: "Version 3 by Alice: name changed". */
+  private async changesSince(experimentId: string, version: number, transaction?: Transaction): Promise<string[]> {
+    const events = await OrmExperimentHistory.findAll({
+      where: { experimentId, experimentVersion: { [Op.gt]: version } },
+      include: [{ model: OrmUser, as: "user", attributes: ["name"], required: false }],
+      order: [["createdAt", "ASC"]],
+      transaction,
+    });
+    return events.map((event: any) =>
+      `Version ${event.experimentVersion} by ${event.user?.name ?? event.userId}: ${describeChange(event)}`
+    );
+  }
+
+  /** LAB-COL-02: the other collaborators are notified of a saved change. */
+  private async notifyChange(experimentId: string, name: string, version: number, userId: string, changes: string[]) {
+    const collaborators = await OrmExperimentUser.findAll({ where: { experimentId }, attributes: ["userId"] });
+    const author = await OrmUser.findByPk(userId, { attributes: ["name"] });
+    const userIds = collaborators.map((c) => c.userId!).filter((id) => id !== userId);
+    if (userIds.length === 0) return;
+    await getNotificationGateway()
+      .notifyExperimentChanged({ userIds, experimentId, experimentName: name, version, changedBy: (author as any)?.name ?? userId, changes })
+      .catch((error) => console.error("Change notification failed:", error));
+  }
+
+  private async validatePublishExperiment(id: string, transaction?: Transaction): Promise<OrmExperiment> {
     const experiment = await OrmExperiment.findByPk(id, {
         include: [
             {
@@ -132,18 +384,228 @@ export default class ExperimentRepository {
                 as: "metrics",
             },
         ],
+        transaction,
     });
 
-    if (!experiment) {
-        throw new Error("Experiment not found");
+    if (!experiment || experiment.deletedAt) {
+        throw new NotFoundError();
     }
 
     if (!experiment.scenarios || experiment.scenarios.length === 0) {
-        throw new Error("An experiment must contain at least one scenario before publishing");
+        throw new ValidationError("An experiment must contain at least one scenario before publishing");
     }
 
     if (!experiment.metrics || experiment.metrics.length === 0) {
-        throw new Error("An experiment must contain at least one metric before publishing");
+        throw new ValidationError("An experiment must contain at least one metric before publishing");
+    }
+
+    return experiment;
+  }
+
+  /**
+   * Scenario list from the request, with names and solver configurations. A
+   * scenario keeps its id only if it already belongs to the experiment; new
+   * scenarios get a server-side id.
+   */
+  private normalizeScenarios(
+    scenarios: ExperimentInput["scenarios"],
+    existingIds: string[] = []
+  ): (ScenarioInput & { id: string })[] {
+    return (scenarios ?? []).map((scenario, index) => ({
+      id: scenario.id && existingIds.includes(scenario.id) ? scenario.id : randomUUID(),
+      name: scenario.name?.trim() || `Scenario ${index + 1}`,
+      modelIds: this.modelIdsOf(scenario),
+      // `solverConfig` is what the first version of the service expected
+      solverConfigs: scenario.solverConfigs ?? scenario.solverConfig ?? {},
+      operationalContext: scenario.operationalContext ?? undefined,
+    }));
+  }
+
+  /** The scenario models, in order and without duplicates. */
+  private modelIdsOf(scenario: NonNullable<ExperimentInput["scenarios"]>[number]): string[] {
+    const ids =
+      scenario.modelIds ??
+      scenario.models?.map((model) => model.modelId) ??
+      (scenario.modelId ? [scenario.modelId] : []);
+    return [...new Set(ids.filter((id): id is string => typeof id === "string" && id !== ""))];
+  }
+
+  private metricIdsOf(experiment: ExperimentInput): string[] {
+    const ids = experiment.metricIds ?? (experiment.metrics ?? []).map((metric: any) =>
+      typeof metric === "string" ? metric : metric?.id
+    );
+    return [...new Set(ids.filter(Boolean) as string[])];
+  }
+
+  /** A user can only attach public metrics and their own (LAB-MT-01, LAB-MT-02). */
+  private async ensureMetricsUsable(metricIds: string[], userId: string, transaction?: Transaction) {
+    if (metricIds.some((id) => !UUID_PATTERN.test(id))) {
+      throw new ValidationError("Unknown metric.");
+    }
+    if (metricIds.length === 0) return;
+
+    const count = await OrmMetric.count({
+      where: {
+        id: metricIds,
+        [Op.or]: [{ userId: null }, { userId }],
+      },
+      transaction,
+    });
+
+    if (count !== metricIds.length) {
+      throw new ValidationError("Unknown metric, or a private metric of another user.");
+    }
+  }
+
+  private snapshotOf(
+    experiment: { name?: string; description?: string; hypothesis?: string; projectId?: string | null; labels?: string[] },
+    metricIds: string[],
+    scenarios: ScenarioInput[]
+  ): ExperimentConfigSnapshot {
+    return {
+      name: experiment.name ?? "",
+      description: experiment.description,
+      hypothesis: experiment.hypothesis,
+      projectId: experiment.projectId ?? null,
+      labels: experiment.labels ?? [],
+      metricIds: [...metricIds].sort(),
+      scenarios: scenarios.map((scenario) => ({
+        id: scenario.id!,
+        name: scenario.name,
+        modelIds: scenario.modelIds ?? [],
+        solverConfigs: (scenario.solverConfigs ?? {}) as any,
+        operationalContext: (scenario.operationalContext ?? undefined) as any,
+      })),
+    };
+  }
+
+  private async createScenarios(experimentId: string, scenarios: ScenarioInput[], transaction: Transaction) {
+    if (scenarios.length === 0) return;
+
+    await OrmScenario.bulkCreate(
+      scenarios.map((scenario, position) => ({
+        id: scenario.id,
+        experimentId,
+        name: scenario.name,
+        position,
+        solverConfigs: (scenario.solverConfigs ?? {}) as any,
+        operationalContext: (scenario.operationalContext ?? null) as any,
+      })),
+      { transaction }
+    );
+
+    const models = scenarios.flatMap((scenario) =>
+      (scenario.modelIds ?? []).map((modelId, position) => ({ scenarioId: scenario.id!, position, modelId }))
+    );
+    if (models.length > 0) {
+      await OrmScenarioModel.bulkCreate(models, { transaction });
+    }
+  }
+
+  private async replaceMetrics(experimentId: string, metricIds: string[], transaction: Transaction) {
+    await OrmExperimentMetric.destroy({ where: { experimentId }, transaction });
+
+    if (metricIds.length > 0) {
+      await OrmExperimentMetric.bulkCreate(
+        metricIds.map((metricId) => ({ experimentId, metricId })),
+        { transaction }
+      );
+    }
+  }
+
+  async loadDetailed(id: string, userRole: string, transaction?: Transaction, userId?: string): Promise<ExperimentDetailed> {
+    const ormExperiment = await OrmExperiment.findByPk(id, {
+      include: [
+        {
+          model: OrmExperimentUser,
+          as: "users",
+          include: [
+            {
+              model: OrmUser,
+              as: "user",
+            },
+          ],
+        },
+        {
+          model: OrmScenario,
+          as: "scenarios",
+          include: [
+            {
+              model: OrmScenarioModel,
+              as: "models",
+              include: [
+                {
+                  model: OrmModel,
+                  as: "model",
+                },
+              ],
+            },
+          ],
+        },
+        {
+          model: OrmMetric,
+          as: "metrics",
+        },
+      ],
+      order: [[{ model: OrmScenario, as: "scenarios" }, "position", "ASC"]],
+      transaction,
+    });
+
+    if (!ormExperiment || ormExperiment.deletedAt) {
+      throw new NotFoundError();
+    }
+
+    const experiment = new ExperimentDetailed(
+      ormExperiment.id,
+      ormExperiment.name,
+      ormExperiment.version,
+      ormExperiment.labels ?? [],
+      ormExperiment.status,
+      userRole,
+      ormExperiment.isTemplate,
+      ormExperiment.isBenchmark,
+      ormExperiment.description,
+      ormExperiment.hypothesis,
+      ormExperiment.createdAt,
+      ormExperiment.updatedAt
+    );
+
+    experiment.projectId = ormExperiment.projectId ?? null;
+    experiment.reproducedFrom = ormExperiment.reproducedFrom ?? null;
+    const access = userId ? ormExperiment.users?.find((user) => user.userId === userId) : undefined;
+    experiment.permissions = access?.role
+      ? permissionsOf({ role: access.role, canWrite: access.canWrite, canExecute: access.canExecute })
+      : { read: true, write: false, execute: false, manage: false };
+    experiment.scenarios = (ormExperiment.scenarios ?? []).map(Scenario.fromOrm);
+
+    experiment.metrics = (ormExperiment.metrics ?? []).map(
+      (metric) =>
+        new Metric(
+          metric.id,
+          metric.name,
+          metric.formula,
+          metric.unit,
+          metric.script,
+          metric.createdAt,
+          metric.updatedAt,
+          metric.description,
+          metric.userId
+        )
+    );
+
+    const owner = ormExperiment.users?.find(
+      (user) => user.role === ExperimentRoleEnum.OWNER
+    );
+
+    experiment.author = (owner?.user as any)?.name ?? "";
+
+    if (ormExperiment.clonedFromExperimentId) {
+      experiment.clonedFrom = {
+        experimentId: ormExperiment.clonedFromExperimentId,
+        version: ormExperiment.clonedFromVersion ?? null,
+        // Shown when the owner of the clone may read the original
+        name: (await this.originNames([ormExperiment], owner?.userId ?? "")).get(ormExperiment.clonedFromExperimentId) ?? null,
+      };
     }
 
     return experiment;
@@ -157,9 +619,8 @@ export default class ExperimentRepository {
 
     const where = {
       ...this.buildNameFilter(filter),
-      status: {
-        [Op.ne]: "archived",
-      },
+      // Archived experiments have their own list; a status filter narrows the others
+      status: filter.status && filter.status !== "archived" ? filter.status : { [Op.ne]: "archived" },
     };
 
     return this.buildPagedResponse(
@@ -178,9 +639,8 @@ export default class ExperimentRepository {
 
     const where = {
       ...this.buildNameFilter(filter),
-      status: {
-        [Op.ne]: "archived",
-      },
+      // Archived experiments have their own list; a status filter narrows the others
+      status: filter.status && filter.status !== "archived" ? filter.status : { [Op.ne]: "archived" },
     };
 
     return this.buildPagedResponse(
@@ -200,9 +660,8 @@ export default class ExperimentRepository {
 
     const where = {
       ...this.buildNameFilter(filter),
-      status: {
-        [Op.ne]: "archived",
-      },
+      // Archived experiments have their own list; a status filter narrows the others
+      status: filter.status && filter.status !== "archived" ? filter.status : { [Op.ne]: "archived" },
     };
     return this.buildPagedResponse(
       request,
@@ -255,125 +714,42 @@ export default class ExperimentRepository {
       request,
       filter.userId!,
       where,
-      this.buildUserInclude(filter.userId!, ["owner"])
+      this.buildUserInclude(filter.userId!, MANAGE_ROLES)
     );
   }
 
-  
-  async getExperimentDetailed( id: string, userId: string ): Promise<ExperimentDetailed | null> {
-
-      await this.ensureExperimentPermission(
-        id,
-        userId,
-        [ExperimentRoleEnum.VIEWER, ExperimentRoleEnum.EDITOR, ExperimentRoleEnum.DIRECTOR, ExperimentRoleEnum.OWNER]
-      );
-
-    const ormExperiment = await OrmExperiment.findByPk(id, {
-      include: [
-        {
-          model: OrmExperimentUser,
-          as: "users",
-          include: [
-            {
-              model: OrmUser,
-              as: "user",
-            },
-          ],
-        },
-        {
-          model: OrmScenario,
-          as: "scenarios",
-          include: [
-            {
-              model: OrmModel,
-              as: "model",
-            },
-          ],
-        },
-        {
-          model: OrmMetric,
-          as: "metrics",
-        },
-      ],
-    });
-
-    const userRole = ormExperiment?.users?.find( (user) => user.userId === userId)?.role ?? ExperimentRoleEnum.VIEWER;
-
-    if (!ormExperiment) {
-      return null;
-    }
-
-    const experiment = new ExperimentDetailed(
-      ormExperiment.id,
-      ormExperiment.name,
-      ormExperiment.version,
-      ormExperiment.labels ?? [],
-      ormExperiment.status,
-      userRole,
-      ormExperiment.isTemplate,
-      ormExperiment.isBenchmark,
-      ormExperiment.description,
-      ormExperiment.hypothesis,
-      ormExperiment.createdAt,
-      ormExperiment.updatedAt
-    );
-
-    experiment.scenarios = (ormExperiment.scenarios ?? []).map(
-      (scenario) =>
-        new Scenario(
-          scenario.id,
-          scenario.experimentId,
-          scenario.modelId,
-          scenario.model 
-            ? ModelEntity.fromOrm(scenario.model)
-            : undefined,
-          scenario.solverConfig,
-        )
-    );
-
-    experiment.metrics = (ormExperiment.metrics ?? []).map(
-      (metric) =>
-        new Metric(
-          metric.id,
-          metric.name,
-          metric.formula,
-          metric.unit,
-          metric.script,
-          metric.createdAt,
-          metric.updatedAt,
-          metric.description,
-          metric.userId
-        )
-    );
-
-    const owner = ormExperiment.users?.find(
-      (user) => user.role === ExperimentRoleEnum.OWNER
-    );
-
-    experiment.author = owner?.user?.name ?? "";
-
-    console.log("Experiment detailed:", experiment); 
-    return experiment;
+  async getExperimentDetailed(id: string, userId: string): Promise<ExperimentDetailed> {
+    const { role } = await this.ensureExperimentPermission(id, userId, "read", undefined, true);
+    return this.loadDetailed(id, role, undefined, userId);
   }
 
-  async saveExperiment(experiment: ExperimentDetailed, userId: string) {
+  /** LAB-EX-01: a new experiment is always a Draft owned by its creator. */
+  async saveExperiment(experiment: ExperimentInput, userId: string): Promise<ExperimentDetailed> {
     if (!experiment.name?.trim()) {
-      throw new Error("Experiment name is required.");
+      throw new ValidationError("Experiment name is required.");
     }
+
+    const scenarios = this.normalizeScenarios(experiment.scenarios);
+    const metricIds = this.metricIdsOf(experiment);
+    const snapshot = this.snapshotOf({ ...experiment, projectId: experiment.projectId ?? null }, metricIds, scenarios);
+
     const transaction = await sequelize.transaction();
-    console.log("Saving experiment:", experiment);
     try {
+      const projectId = await this.ensureProjectAccess(experiment.projectId, userId, transaction);
+      await this.ensureMetricsUsable(metricIds, userId, transaction);
+
       const createdExperiment = await OrmExperiment.create(
         {
-          id: experiment.id,
-          name: experiment.name,
+          id: randomUUID(),
+          name: experiment.name.trim(),
           description: experiment.description,
           hypothesis: experiment.hypothesis,
-          version: experiment.version,
-          labels: experiment.labels,
-          status: experiment.status,
-          isTemplate: experiment.isTemplate,
-          isBenchmark: experiment.isBenchmark,
+          projectId,
+          version: 1,
+          labels: experiment.labels ?? [],
+          status: "draft",
+          isTemplate: false,
+          isBenchmark: false,
         },
         { transaction }
       );
@@ -389,27 +765,13 @@ export default class ExperimentRepository {
         { transaction }
       );
 
-      if (experiment.scenarios?.length) {
-        await OrmScenario.bulkCreate(
-          experiment.scenarios.map((scenario) => ({
-            id: scenario.id,
-            experimentId,
-            modelId: scenario.modelId,
-            solverConfig: scenario.solverConfig,
-          })),
-          { transaction }
-        );
-      }
+      await this.createScenarios(experimentId, scenarios, transaction);
+      await this.replaceMetrics(experimentId, metricIds, transaction);
 
-      if (experiment.metrics?.length) {
-        await OrmExperimentMetric.bulkCreate(
-          experiment.metrics.map((metric) => ({
-            experimentId,
-            metricId: metric.id,
-          })),
-          { transaction }
-        );
-      }
+      await OrmExperimentVersion.create(
+        { experimentId, version: 1, userId, config: snapshot },
+        { transaction }
+      );
 
       await OrmExperimentHistory.create(
         {
@@ -417,29 +779,14 @@ export default class ExperimentRepository {
           experimentVersion: 1,
           userId,
           eventType: "experiment_created",
-          newValue: {
-            name: experiment.name,
-            description: experiment.description,
-            hypothesis: experiment.hypothesis,
-            labels: experiment.labels,
-            metrics: experiment.metrics?.map((m) => m.id) ?? [],
-            scenarios:
-              experiment.scenarios?.map((s) => ({
-                id: s.id,
-                modelId: s.modelId,
-                solverConfig: s.solverConfig,
-              })) ?? [],
-            status: experiment.status,
-            isTemplate: experiment.isTemplate,
-            isBenchmark: experiment.isBenchmark,
-          },
+          newValue: { ...snapshot, status: "draft" },
         },
         { transaction }
       );
 
       await transaction.commit();
 
-      return this.getExperimentDetailed(experimentId, userId);
+      return this.loadDetailed(experimentId, ExperimentRoleEnum.OWNER, undefined, userId);
 
     } catch (error) {
       await transaction.rollback();
@@ -447,368 +794,290 @@ export default class ExperimentRepository {
     }
   }
 
-  async updateExperiment(experiment: ExperimentDetailed, userId: string): Promise<ExperimentDetailed | null> {
+  /**
+   * LAB-EX-03 / LAB-EX-04: saves a change as a new version. In Draft the
+   * experiment is edited in place; a Ready or finished experiment goes back to
+   * Draft; a running or archived one is rejected. The status, template and
+   * benchmark flags are never taken from the request: they have their own actions.
+   */
+  async updateExperiment(
+    experiment: ExperimentInput,
+    userId: string,
+    restoredFromVersion?: number
+  ): Promise<ExperimentDetailed> {
     const transaction = await sequelize.transaction();
 
     try {
-      await this.ensureExperimentPermission(
-        experiment.id,
+      // Locked until commit: concurrent saves are made one after the other (LAB-COL-02)
+      const { experiment: current, role } = await this.ensureExperimentPermission(
+        experiment.id!,
         userId,
-        [
-          ExperimentRoleEnum.OWNER,
-          ExperimentRoleEnum.DIRECTOR,
-          ExperimentRoleEnum.EDITOR,
-        ],
+        "write",
+        transaction,
+        false,
+        true
+      );
+
+      if (typeof experiment.expectedVersion === "number" && experiment.expectedVersion !== current.version) {
+        throw new ConflictError(
+          `Someone saved version ${current.version} while you were editing version ${experiment.expectedVersion}.`,
+          await this.changesSince(current.id, experiment.expectedVersion, transaction)
+        );
+      }
+
+      const outcome = editOutcome(current.status);
+      if (outcome === "rejected") {
+        throw new ConflictError(editRejection(current.status));
+      }
+
+      if (experiment.name !== undefined && !experiment.name.trim()) {
+        throw new ValidationError("Experiment name is required.");
+      }
+
+      const previousExperiment = await this.loadDetailed(current.id, role, transaction, userId);
+
+      const next = {
+        name: experiment.name?.trim() ?? previousExperiment.name,
+        description: experiment.description ?? previousExperiment.description,
+        hypothesis: experiment.hypothesis ?? previousExperiment.hypothesis,
+        projectId: experiment.projectId ?? previousExperiment.projectId ?? null,
+        labels: experiment.labels ?? previousExperiment.labels,
+      };
+
+      if (next.projectId !== (previousExperiment.projectId ?? null)) {
+        await this.ensureProjectAccess(next.projectId, userId, transaction);
+      }
+      const scenarios = experiment.scenarios
+        ? this.normalizeScenarios(experiment.scenarios, previousExperiment.scenarios.map((s) => s.id))
+        : previousExperiment.scenarios.map(toScenarioInput);
+      const metricIds =
+        experiment.metrics || experiment.metricIds
+          ? this.metricIdsOf(experiment)
+          : previousExperiment.metrics.map((m) => m.id);
+
+      await this.ensureMetricsUsable(
+        metricIds.filter((id) => !previousExperiment.metrics.some((m) => m.id === id)),
+        userId,
         transaction
       );
 
-      const previousExperiment = await this.getExperimentDetailed(
-        experiment.id,
-        userId
-      );
-
-      if (!previousExperiment) {
-        throw new Error("Experiment not found.");
-      }
-
       const nextVersion = previousExperiment.version + 1;
-
       const history: ExperimentHistoryCreationAttributes[] = [];
+      const event = (attributes: Omit<ExperimentHistoryCreationAttributes, "experimentId" | "experimentVersion" | "userId">) =>
+        history.push({ experimentId: current.id, experimentVersion: nextVersion, userId, ...attributes });
 
       // Experiment fields
 
-      if (previousExperiment.name !== experiment.name) {
-        history.push({
-          experimentId: experiment.id,
-          experimentVersion: nextVersion,
-          userId,
-          eventType: "name_updated",
-          oldValue: previousExperiment.name,
-          newValue: experiment.name,
-        });
+      if (previousExperiment.name !== next.name) {
+        event({ eventType: "name_updated", oldValue: previousExperiment.name, newValue: next.name });
+      }
+
+      if ((previousExperiment.description ?? "") !== (next.description ?? "")) {
+        event({ eventType: "description_updated", oldValue: previousExperiment.description, newValue: next.description });
+      }
+
+      if ((previousExperiment.hypothesis ?? "") !== (next.hypothesis ?? "")) {
+        event({ eventType: "hypothesis_updated", oldValue: previousExperiment.hypothesis, newValue: next.hypothesis });
+      }
+
+      if (next.projectId !== (previousExperiment.projectId ?? null)) {
+        event({ eventType: "project_updated", oldValue: previousExperiment.projectId, newValue: next.projectId });
       }
 
       if (
-        previousExperiment.description !== experiment.description
+        JSON.stringify([...(previousExperiment.labels ?? [])].sort()) !==
+        JSON.stringify([...(next.labels ?? [])].sort())
       ) {
-        history.push({
-          experimentId: experiment.id,
-          experimentVersion: nextVersion,
-          userId,
-          eventType: "description_updated",
-          oldValue: previousExperiment.description,
-          newValue: experiment.description,
-        });
-      }
-
-      if (
-        previousExperiment.hypothesis !== experiment.hypothesis
-      ) {
-        history.push({
-          experimentId: experiment.id,
-          experimentVersion: nextVersion,
-          userId,
-          eventType: "hypothesis_updated",
-          oldValue: previousExperiment.hypothesis,
-          newValue: experiment.hypothesis,
-        });
-      }
-
-      if (
-        JSON.stringify(
-          [...(previousExperiment.labels ?? [])].sort()
-        ) !==
-        JSON.stringify(
-          [...(experiment.labels ?? [])].sort()
-        )
-      ) {
-        history.push({
-          experimentId: experiment.id,
-          experimentVersion: nextVersion,
-          userId,
-          eventType: "labels_updated",
-          oldValue: previousExperiment.labels,
-          newValue: experiment.labels,
-        });
+        event({ eventType: "labels_updated", oldValue: previousExperiment.labels, newValue: next.labels });
       }
 
       // Metrics
 
-      const previousMetricIds = previousExperiment.metrics
-        .map((m) => m.id)
-        .sort();
+      const previousMetricIds = previousExperiment.metrics.map((m) => m.id).sort();
+      const currentMetricIds = [...metricIds].sort();
 
-      const currentMetricIds = experiment.metrics
-        .map((m) => m.id)
-        .sort();
-
-      if (
-        JSON.stringify(previousMetricIds) !==
-        JSON.stringify(currentMetricIds)
-      ) {
-        history.push({
-          experimentId: experiment.id,
-          experimentVersion: nextVersion,
-          userId,
-          eventType: "metrics_updated",
-          oldValue: previousMetricIds,
-          newValue: currentMetricIds,
-        });
+      if (JSON.stringify(previousMetricIds) !== JSON.stringify(currentMetricIds)) {
+        event({ eventType: "metrics_updated", oldValue: previousMetricIds, newValue: currentMetricIds });
       }
+
       // Scenarios
 
-      const previousScenarioIds = previousExperiment.scenarios.map(
-        (s) => s.id
-      );
+      const previousScenarioIds = previousExperiment.scenarios.map((s) => s.id);
+      const currentScenarioIds = scenarios.map((s) => s.id!);
 
-      const currentScenarioIds = experiment.scenarios.map(
-        (s) => s.id
-      );
-      
-      console.log("Previous", previousExperiment.scenarios.map(s => s.id));
-      console.log("Current", experiment.scenarios.map(s => s.id));
-
-      const addedScenarios = currentScenarioIds.filter(
-        (id) => !previousScenarioIds.includes(id)
-      );
-
-      const removedScenarios = previousScenarioIds.filter(
-        (id) => !currentScenarioIds.includes(id)
-      );
-
-      for (const scenarioId of addedScenarios) {
-        const scenario = experiment.scenarios.find(
-          (s) => s.id === scenarioId
-        );
-
-        history.push({
-          experimentId: experiment.id,
-          scenarioId,
-          experimentVersion: nextVersion,
-          userId,
-          eventType: "scenario_added",
-          newValue: {
-            modelId: scenario?.modelId,
-            solverConfig: scenario?.solverConfig,
-          },
-        });
-      }
-
-      for (const scenarioId of removedScenarios) {
-        const scenario = previousExperiment.scenarios.find(
-          (s) => s.id === scenarioId
-        );
-
-        history.push({
-          experimentId: experiment.id,
-          scenarioId,
-          experimentVersion: nextVersion,
-          userId,
-          eventType: "scenario_removed",
-          oldValue: {
-            modelId: scenario?.modelId,
-            solverConfig: scenario?.solverConfig,
-          },
-        });
-      }
-
-      for (const scenario of experiment.scenarios) {
-        const previousScenario =
-          previousExperiment.scenarios.find(
-            (s) => s.id === scenario.id
-          );
+      for (const scenario of scenarios) {
+        const previousScenario = previousExperiment.scenarios.find((s) => s.id === scenario.id);
 
         if (!previousScenario) {
+          event({
+            eventType: "scenario_added",
+            scenarioId: scenario.id,
+            newValue: { name: scenario.name, modelIds: scenario.modelIds, solverConfigs: scenario.solverConfigs },
+          });
           continue;
         }
 
-        if (
-          previousScenario.modelId !== scenario.modelId
-        ) {
-          history.push({
-            experimentId: experiment.id,
-            scenarioId: scenario.id,
-            experimentVersion: nextVersion,
-            userId,
+        const previousModelIds = previousScenario.models.map((model) => model.modelId);
+        if (JSON.stringify(previousModelIds) !== JSON.stringify(scenario.modelIds ?? [])) {
+          event({
             eventType: "scenario_model_updated",
-            oldValue: previousScenario.modelId,
-            newValue: scenario.modelId,
+            scenarioId: scenario.id,
+            oldValue: previousModelIds,
+            newValue: scenario.modelIds,
+          });
+        }
+
+        if (JSON.stringify(previousScenario.solverConfigs ?? {}) !== JSON.stringify(scenario.solverConfigs ?? {})) {
+          event({
+            eventType: "scenario_solver_config_updated",
+            scenarioId: scenario.id,
+            oldValue: previousScenario.solverConfigs,
+            newValue: scenario.solverConfigs,
           });
         }
 
         if (
-          JSON.stringify(previousScenario.solverConfig) !==
-          JSON.stringify(scenario.solverConfig)
+          (previousScenario.name ?? "") !== (scenario.name ?? "") ||
+          JSON.stringify(previousScenario.operationalContext ?? null) !==
+            JSON.stringify(scenario.operationalContext ?? null)
         ) {
-          history.push({
-            experimentId: experiment.id,
+          event({
+            eventType: "scenario_updated",
             scenarioId: scenario.id,
-            experimentVersion: nextVersion,
-            userId,
-            eventType: "scenario_solver_config_updated",
-            oldValue: previousScenario.solverConfig,
-            newValue: scenario.solverConfig,
+            oldValue: { name: previousScenario.name, operationalContext: previousScenario.operationalContext },
+            newValue: { name: scenario.name, operationalContext: scenario.operationalContext },
           });
         }
+      }
+
+      for (const scenario of previousExperiment.scenarios.filter((s) => !currentScenarioIds.includes(s.id))) {
+        event({
+          eventType: "scenario_removed",
+          scenarioId: scenario.id,
+          oldValue: {
+            name: scenario.name,
+            modelIds: scenario.models.map((model) => model.modelId),
+            solverConfigs: scenario.solverConfigs,
+          },
+        });
+      }
+
+      const positionsChanged =
+        JSON.stringify(previousScenarioIds.filter((id) => currentScenarioIds.includes(id))) !==
+        JSON.stringify(currentScenarioIds.filter((id) => previousScenarioIds.includes(id)));
+
+      // Nothing changed: no new version
+      if (history.length === 0 && !positionsChanged) {
+        await transaction.rollback();
+        return previousExperiment;
+      }
+
+      const nextStatus: ExperimentStatus = outcome === "new-draft" ? "draft" : current.status;
+
+      if (nextStatus !== current.status) {
+        event({ eventType: "status_changed", oldValue: current.status, newValue: nextStatus });
+      }
+
+      if (restoredFromVersion !== undefined) {
+        event({ eventType: "version_restored", newValue: { version: restoredFromVersion } });
       }
 
       // Update experiment
 
-      const [updated] = await OrmExperiment.update(
+      await OrmExperiment.update(
         {
-          name: experiment.name,
-          description: experiment.description,
-          hypothesis: experiment.hypothesis,
+          ...next,
           version: nextVersion,
-          labels: experiment.labels,
-          status: experiment.status,
-          isTemplate: experiment.isTemplate,
-          isBenchmark: experiment.isBenchmark,
+          status: nextStatus,
         },
         {
-          where: {
-            id: experiment.id,
-          },
+          where: { id: current.id },
           transaction,
         }
       );
 
-      if (updated === 0) {
-        throw new Error("Experiment not found.");
-      }
+      // A changed configuration is no longer the one pinned at Ready: scenarios are rewritten unpinned.
+      await OrmScenario.destroy({ where: { experimentId: current.id }, transaction });
+      await this.createScenarios(current.id, scenarios, transaction);
+      await this.replaceMetrics(current.id, metricIds, transaction);
 
-      // Delete removed scenarios
-      await OrmScenario.destroy({
-        where: {
-          experimentId: experiment.id,
-          id: {
-            [Op.in]: previousScenarioIds.filter(
-              id => !currentScenarioIds.includes(id)
-            ),
-          },
+      await OrmExperimentVersion.create(
+        {
+          experimentId: current.id,
+          version: nextVersion,
+          userId,
+          config: this.snapshotOf(next, metricIds, scenarios),
         },
-        transaction,
-      });
+        { transaction }
+      );
 
-      // Update existing scenarios / Create new ones
-      for (const scenario of experiment.scenarios) {
-        console.log(
-          scenario.id,
-          previousScenarioIds.includes(scenario.id)
-        );
-        const exists = previousScenarioIds.includes(scenario.id);
-
-        if (exists) {
-          await OrmScenario.update(
-            {
-              modelId: scenario.modelId,
-              solverConfig: scenario.solverConfig,
-            },
-            {
-              where: {
-                id: scenario.id,
-              },
-              transaction,
-            }
-          );
-        } else {
-          await OrmScenario.create(
-            {
-              id: scenario.id,
-              experimentId: experiment.id,
-              modelId: scenario.modelId,
-              solverConfig: scenario.solverConfig,
-            },
-            { transaction }
-          );
-        }
-      }
-
-      // Replace metrics
-
-      await OrmExperimentMetric.destroy({
-        where: {
-          experimentId: experiment.id,
-        },
-        transaction,
-      });
-
-      if (experiment.metrics.length > 0) {
-        await OrmExperimentMetric.bulkCreate(
-          experiment.metrics.map((metric) => ({
-            experimentId: experiment.id,
-            metricId: metric.id,
-          })),
-          { transaction }
-        );
-      }
-
-      // Save history
-
-      if (history.length > 0) {
-        await OrmExperimentHistory.bulkCreate(history, {
-          transaction,
-        });
-      }
+      await OrmExperimentHistory.bulkCreate(history, { transaction });
 
       await transaction.commit();
 
-      return this.getExperimentDetailed(
-        experiment.id,
-        userId
-      );
+      await this.notifyChange(current.id, next.name, nextVersion, userId, history.map(describeChange));
+
+      return this.loadDetailed(current.id, role, undefined, userId);
     } catch (error) {
       await transaction.rollback();
       throw error;
     }
   }
 
-  async deleteExperiment(id: string, userId: string) {
+  private async setStatus(
+    experiment: OrmExperiment,
+    userId: string,
+    changes: Partial<Pick<OrmExperiment, "status" | "statusBeforeArchive" | "deletedAt">>,
+    eventType: ExperimentHistoryCreationAttributes["eventType"],
+    transaction: Transaction
+  ) {
+    await OrmExperiment.update(changes, { where: { id: experiment.id }, transaction });
+
+    await OrmExperimentHistory.create(
+      {
+        experimentId: experiment.id,
+        experimentVersion: experiment.version,
+        userId,
+        eventType,
+        oldValue: experiment.status,
+        newValue: changes.status ?? experiment.status,
+      },
+      { transaction }
+    );
+  }
+
+  /**
+   * LAB-EX-05: logical deletion by the creator or the research director. An
+   * experiment with completed executions is archived instead.
+   */
+  async deleteExperiment(id: string, userId: string): Promise<DeleteResult> {
     const transaction = await sequelize.transaction();
 
     try {
-      await this.ensureExperimentPermission(
-        id,
-        userId,
-        [ExperimentRoleEnum.OWNER],
-        transaction
-      );
+      const { experiment } = await this.ensureExperimentPermission(id, userId, "manage", transaction);
 
-      await OrmExperimentUser.destroy({
-        where: {
-          experimentId: id,
-        },
-        transaction,
-      });
+      const completedRuns = await OrmRun.count({ where: { experimentId: id, status: "completed" }, transaction });
+      const outcome = deleteOutcome(experiment.status, completedRuns > 0);
 
-      await OrmScenario.destroy({
-        where: {
-          experimentId: id,
-        },
-        transaction,
-      });
+      if (outcome === "rejected") {
+        throw new ConflictError(deleteRejection(experiment.status));
+      }
 
-      await OrmExperimentMetric.destroy({
-        where: {
-          experimentId: id,
-        },
-        transaction,
-      });
-
-      const deleted = await OrmExperiment.destroy({
-        where: {
-          id,
-        },
-        transaction,
-      });
-
-      if (deleted === 0) {
-        throw new Error("Experiment not found.");
+      if (outcome === "archive") {
+        await this.setStatus(
+          experiment,
+          userId,
+          { status: "archived", statusBeforeArchive: experiment.status },
+          "experiment_archived",
+          transaction
+        );
+      } else {
+        await this.setStatus(experiment, userId, { deletedAt: new Date() }, "experiment_deleted", transaction);
       }
 
       await transaction.commit();
 
-      return true;
+      return outcome === "archive" ? "archived" : "deleted";
 
     } catch (error) {
       await transaction.rollback();
@@ -816,117 +1085,194 @@ export default class ExperimentRepository {
     }
   }
 
-  async archiveExperiment(id: string, userId: string) {
+  /** LAB-EX-06: archive, remembering the state to restore. */
+  async archiveExperiment(id: string, userId: string): Promise<ExperimentDetailed> {
     const transaction = await sequelize.transaction();
 
     try {
-      await this.ensureExperimentPermission(
-        id,
-        userId,
-        [ExperimentRoleEnum.OWNER],
-        transaction
-      );
+      const { experiment, role } = await this.ensureExperimentPermission(id, userId, "manage", transaction);
 
-      const [updated] = await OrmExperiment.update(
-        {
-          status: "archived",
-        },
-        {
-          where: {
-            id,
-          },
-          transaction,
-        }
-      );
-
-    if (updated === 0) {
-      throw new Error("Experiment not found.");
-    }
-    await transaction.commit();
-
-    return this.getExperimentDetailed(id, userId);
-  }
-  catch (error) {
-    await transaction.rollback();
-    throw error;
-  }
-}
-
-  async restoreExperiment(id: string, userId: string) {
-    const transaction = await sequelize.transaction();
-
-    try {
-      await this.ensureExperimentPermission(
-        id,
-        userId,
-        [ExperimentRoleEnum.OWNER],
-        transaction
-      );
-
-      const [updated] = await OrmExperiment.update(
-        {
-        status: "draft",
-        },
-        {
-          where: {
-            id,
-          },
-          transaction,
-        }
-      );
-      
-      if (updated === 0) {
-        throw new Error("Experiment not found.");
+      if (!canArchive(experiment.status)) {
+        throw new ConflictError(`An experiment in state '${experiment.status}' cannot be archived.`);
       }
-    }
-    catch (error) {
+
+      await this.setStatus(
+        experiment,
+        userId,
+        { status: "archived", statusBeforeArchive: experiment.status },
+        "experiment_archived",
+        transaction
+      );
+
+      await transaction.commit();
+
+      return this.loadDetailed(id, role, undefined, userId);
+    } catch (error) {
       await transaction.rollback();
       throw error;
     }
-    await transaction.commit();
-    return this.getExperimentDetailed(id, userId);
   }
 
+  /** LAB-EX-06: restoring returns the experiment to its pre-archive state. */
+  async restoreExperiment(id: string, userId: string): Promise<ExperimentDetailed> {
+    const transaction = await sequelize.transaction();
+
+    try {
+      const { experiment, role } = await this.ensureExperimentPermission(id, userId, "manage", transaction);
+
+      if (experiment.status !== "archived") {
+        throw new ConflictError("Only an archived experiment can be restored.");
+      }
+
+      await this.setStatus(
+        experiment,
+        userId,
+        { status: experiment.statusBeforeArchive ?? "draft", statusBeforeArchive: null },
+        "experiment_restored",
+        transaction
+      );
+
+      await transaction.commit();
+
+      return this.loadDetailed(id, role, undefined, userId);
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
+    }
+  }
+
+  /**
+   * LAB-EX-07 Draft -> Ready, after LAB-RUN-01 validation. Each scenario model
+   * is copied and hashed (LAB-CF-01, LAB-R-03): runs will use this exact copy.
+   */
+  async markReady(id: string, userId: string): Promise<ExperimentDetailed> {
+    const transaction = await sequelize.transaction();
+
+    try {
+      const { experiment, role } = await this.ensureExperimentPermission(id, userId, "write", transaction);
+
+      if (!canMarkReady(experiment.status)) {
+        throw new ConflictError(`An experiment in state '${experiment.status}' cannot be marked Ready.`);
+      }
+
+      const detailed = await this.loadDetailed(id, role, transaction, userId);
+      const scenarios = detailed.scenarios.map(toScenarioInput);
+      const modelIds = [...new Set(scenarios.flatMap((s) => s.modelIds ?? []))];
+
+      const models = modelIds.length
+        ? await OrmModel.findAll({
+            where: { id: modelIds, isDeleted: { [Op.not]: true } },
+            transaction,
+          })
+        : [];
+
+      const problems = validateForReady(
+        {
+          name: detailed.name,
+          scenarios,
+          metricIds: detailed.metrics.map((m) => m.id),
+        },
+        {
+          models: new Map(models.map((model) => [model.id, featuresOf(model)])),
+          solvers: await getReasoningGateway().listSolvers(),
+        }
+      );
+
+      // LAB-RP-01: the semantics of each language is pinned with the models
+      const languages = models.length
+        ? await OrmLanguage.findAll({ where: { id: [...new Set(models.map((model) => model.languageId))] }, transaction })
+        : [];
+      models
+        .filter((model) => !languages.some((language) => language.id === model.languageId))
+        .forEach((model) => problems.push(`The language ${model.languageId} of the model ${model.name ?? model.id} does not exist.`));
+
+      if (problems.length > 0) {
+        throw new ValidationError("The experiment is not ready to run.", problems);
+      }
+
+      const pinnedAt = new Date();
+      for (const scenario of scenarios) {
+        for (const [position, modelId] of (scenario.modelIds ?? []).entries()) {
+          const model = models.find((m) => m.id === modelId)!;
+          const semantics = languages.find((language) => language.id === model.languageId)!.semantics ?? {};
+          await OrmScenarioModel.update(
+            {
+              modelSnapshot: model.model,
+              modelSnapshotHash: modelHash(model.model),
+              modelLanguageId: model.languageId,
+              modelPinnedAt: pinnedAt,
+              semanticsSnapshot: semantics,
+              semanticsHash: modelHash(semantics),
+            },
+            { where: { scenarioId: scenario.id, position }, transaction }
+          );
+        }
+      }
+
+      await this.setStatus(experiment, userId, { status: "ready" }, "status_changed", transaction);
+
+      await transaction.commit();
+
+      return this.loadDetailed(id, role, undefined, userId);
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
+    }
+  }
+
+  /**
+   * LAB-COL-01: share with read, write and execute given separately
+   * (`permissions`), or with a role: editor writes and executes, viewer reads.
+   */
   async shareExperiment(
     experimentId: string,
     userEmail: string,
-    role: ExperimentRoleEnum,
-    userId: string
+    role: ExperimentRoleEnum | undefined,
+    userId: string,
+    permissions?: { write?: boolean; execute?: boolean }
   ) {
     const transaction = await sequelize.transaction();
 
     try {
-      await this.ensureExperimentPermission(
+      const { experiment } = await this.ensureExperimentPermission(
         experimentId,
         userId,
-        [ExperimentRoleEnum.OWNER, ExperimentRoleEnum.DIRECTOR],
+        "manage",
         transaction
       );
 
-      if (
-        role === ExperimentRoleEnum.OWNER ||
-        role === ExperimentRoleEnum.DIRECTOR
-      ) {
-        throw new Error(
-          "Owner and Director roles cannot be assigned through sharing."
-        );
+      let canWrite: boolean;
+      let canExecute: boolean;
+      if (permissions) {
+        canWrite = !!permissions.write;
+        canExecute = !!permissions.execute;
+      } else if (role === ExperimentRoleEnum.EDITOR || role === ExperimentRoleEnum.VIEWER) {
+        canWrite = canExecute = role === ExperimentRoleEnum.EDITOR;
+      } else {
+        throw new ValidationError("Give the permissions (write, execute), or the editor or viewer role.");
       }
+      const sharedAs = sharedRole(canWrite);
 
+      // A deleted or disabled account cannot be given access
       const user = await OrmUser.findOne({
         where: {
           email: userEmail,
+          isEnabled: true,
+          isDeleted: false,
         },
         transaction,
       });
 
       if (!user) {
-        throw new Error("User not found.");
+        throw new NotFoundError("User not found.");
       }
+
+      const sharedUserId = user.getDataValue("id");
 
       const existingPermission = await OrmExperimentUser.findOne({
         where: {
           experimentId,
-          userId: user.getDataValue("id"),
+          userId: sharedUserId,
         },
         transaction,
       });
@@ -938,7 +1284,7 @@ export default class ExperimentRepository {
           existingPermission.role === ExperimentRoleEnum.DIRECTOR
         )
       ) {
-        throw new Error(
+        throw new ConflictError(
           "Owner and Director roles cannot be modified."
         );
       }
@@ -946,12 +1292,28 @@ export default class ExperimentRepository {
       await OrmExperimentUser.upsert(
         {
           experimentId,
-          userId: user.getDataValue("id"),
-          role,
+          userId: sharedUserId,
+          role: sharedAs,
+          canWrite,
+          canExecute,
         },
         {
           transaction,
         }
+      );
+
+      await OrmExperimentHistory.create(
+        {
+          experimentId,
+          experimentVersion: experiment.version,
+          userId,
+          eventType: "collaborator_shared",
+          oldValue: existingPermission
+            ? { userId: sharedUserId, role: existingPermission.role, write: !!existingPermission.canWrite, execute: !!existingPermission.canExecute }
+            : undefined,
+          newValue: { userId: sharedUserId, role: sharedAs, write: canWrite, execute: canExecute },
+        },
+        { transaction }
       );
 
       await transaction.commit();
@@ -963,38 +1325,58 @@ export default class ExperimentRepository {
     }
   }
 
-  async copyExperiment( experimentId: string, userId: string ) {
+  /**
+   * LAB-EX-02: the clone is a Draft that records the experiment and version it comes from.
+   * It goes to the given project, or to the project of the original (LAB-EX-01).
+   */
+  async copyExperiment(experimentId: string, userId: string, projectId?: string): Promise<ExperimentDetailed> {
     const transaction = await sequelize.transaction();
 
     try {
-      await this.ensureExperimentPermission(
+      const { role } = await this.ensureExperimentPermission(
         experimentId,
         userId,
-        [ExperimentRoleEnum.OWNER, ExperimentRoleEnum.DIRECTOR, ExperimentRoleEnum.EDITOR, ExperimentRoleEnum.VIEWER],
-        transaction
+        "read",
+        transaction,
+        true
       );
-      const source = await this.getExperimentDetailed(experimentId, userId);
+      const source = await this.loadDetailed(experimentId, role, transaction, userId);
+      const targetProjectId = projectId !== undefined
+        ? await this.ensureProjectAccess(projectId, userId, transaction)
+        : await this.ensureProjectAccess(source.projectId, userId, transaction).catch((error) => {
+            // A template from someone else's project: the user picks the project of the copy
+            if (error instanceof ForbiddenError || error instanceof ValidationError) {
+              throw new ValidationError("Choose the project of the copy.");
+            }
+            throw error;
+          });
 
-      if (!source) {
-        throw new Error("Experiment not found.");
-      }
+      const clone = cloneOf(
+        { ...source, scenarios: source.scenarios.map(toScenarioInput), metrics: source.metrics },
+        userId,
+        randomUUID
+      );
+      const { scenarios, metricIds } = clone;
 
       const newExperiment = await OrmExperiment.create(
         {
-          name: `${source.name} (copy)`,
-          description: source.description,
-          hypothesis: source.hypothesis,
+          id: randomUUID(),
+          name: clone.name,
+          description: clone.description,
+          hypothesis: clone.hypothesis,
+          projectId: targetProjectId,
           version: 1,
-          labels: source.labels,
-          status: "draft",
-          isTemplate: false,
-          isBenchmark: false,
+          labels: clone.labels,
+          status: clone.status,
+          isTemplate: clone.isTemplate,
+          isBenchmark: clone.isBenchmark,
+          clonedFromExperimentId: clone.clonedFrom.experimentId,
+          clonedFromVersion: clone.clonedFrom.version,
         },
         {
           transaction,
         }
       );
-
 
       await OrmExperimentUser.create(
         {
@@ -1007,128 +1389,92 @@ export default class ExperimentRepository {
         }
       );
 
+      await this.createScenarios(newExperiment.id, scenarios, transaction);
+      await this.replaceMetrics(newExperiment.id, metricIds, transaction);
 
-      // Copy scenarios
-      const createdScenarios =
-        source.scenarios.length > 0
-          ? await OrmScenario.bulkCreate(
-              source.scenarios.map(scenario => ({
-                experimentId: newExperiment.id!,
-                modelId: scenario.modelId,
-                solverConfig: scenario.solverConfig,
-              })),
-              {
-                transaction,
-                returning: true,
-              }
-            )
-          : [];
+      const snapshot = this.snapshotOf({ ...source, name: newExperiment.name, projectId: targetProjectId }, metricIds, scenarios);
 
-
-      if (source.metrics.length > 0) {
-        await OrmExperimentMetric.bulkCreate(
-          source.metrics.map((metric) => ({
-            experimentId: newExperiment.id!,
-            metricId: metric.id,
-          })),
-          {
-            transaction,
-          }
-        );
-      }
+      await OrmExperimentVersion.create(
+        { experimentId: newExperiment.id, version: 1, userId, config: snapshot },
+        { transaction }
+      );
 
       await OrmExperimentHistory.create(
-      {
-        experimentId: newExperiment.id,
-        experimentVersion: 1,
-        userId,
-        eventType: "experiment_copied",
-        oldValue: {
-          sourceExperimentId: source.id,
+        {
+          experimentId: newExperiment.id,
+          experimentVersion: 1,
+          userId,
+          eventType: "experiment_copied",
+          oldValue: {
+            sourceExperimentId: source.id,
+            sourceVersion: source.version,
+          },
+          newValue: { ...snapshot, status: "draft" },
         },
-        newValue: {
-          name: newExperiment.name,
-          description: source.description,
-          hypothesis: source.hypothesis,
-          labels: source.labels,
-          metrics: source.metrics.map(m => ({
-            id: m.id,
-            name: m.name,
-            formula: m.formula,
-            unit: m.unit,
-            script: m.script,
-            description: m.description,
-            userId: m.userId,
-          })),
-          scenarios: createdScenarios.map(s => ({
-            id: s.id,
-            modelId: s.modelId,
-            solverConfig: s.solverConfig,
-          })),
-          status: "draft",
-          isTemplate: false,
-          isBenchmark: false,
-        },
-      },
-      { transaction }
-    );
+        { transaction }
+      );
 
       await transaction.commit();
 
-      return this.getExperimentDetailed(newExperiment.id!, userId);
+      return this.loadDetailed(newExperiment.id, ExperimentRoleEnum.OWNER, undefined, userId);
 
     } catch (error) {
       await transaction.rollback();
       throw error;
     }
   }
-    
-  async publishAsTemplate(
-      id: string,
-      userId: string
-    ): Promise<Experiment | null> {
 
-      await this.ensureExperimentPermission(
-          id,
-          userId,
-          [ExperimentRoleEnum.OWNER]
+  private async publish(id: string, userId: string, as: "template" | "benchmark"): Promise<ExperimentDetailed> {
+    const transaction = await sequelize.transaction();
+
+    try {
+      const { role } = await this.ensureExperimentPermission(
+        id,
+        userId,
+        [ExperimentRoleEnum.OWNER],
+        transaction
       );
 
-      const experiment = await this.validatePublishExperiment(id);
+      const experiment = await this.validatePublishExperiment(id, transaction);
 
-      experiment.isTemplate = true;
-      experiment.isBenchmark = false;
+      experiment.isTemplate = as === "template";
+      experiment.isBenchmark = as === "benchmark";
 
-      await experiment.save();
+      await experiment.save({ transaction });
 
-      return this.getExperimentDetailed(id, userId);
+      await OrmExperimentHistory.create(
+        {
+          experimentId: id,
+          experimentVersion: experiment.version,
+          userId,
+          eventType: as === "template" ? "published_as_template" : "published_as_benchmark",
+        },
+        { transaction }
+      );
+
+      await transaction.commit();
+
+      return this.loadDetailed(id, role, undefined, userId);
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
+    }
   }
 
-  async publishAsBenchmark(
-      id: string,
-      userId: string
-  ): Promise<Experiment | null> {
+  async publishAsTemplate(id: string, userId: string): Promise<ExperimentDetailed> {
+    return this.publish(id, userId, "template");
+  }
 
-      await this.ensureExperimentPermission(
-          id,
-          userId,
-          [ExperimentRoleEnum.OWNER]
-      );
-
-      const experiment = await this.validatePublishExperiment(id);
-
-      experiment.isTemplate = false;
-      experiment.isBenchmark = true;
-
-      await experiment.save();
-
-      return this.getExperimentDetailed(id, userId);
+  async publishAsBenchmark(id: string, userId: string): Promise<ExperimentDetailed> {
+    return this.publish(id, userId, "benchmark");
   }
 
   async getExperimentHistory(
     experimentId: string,
     userId: string
   ): Promise<ExperimentHistory[]> {
+    await this.ensureExperimentPermission(experimentId, userId, "read", undefined, true);
+
     const rows = await OrmExperimentHistory.findAll({
       where: {
         experimentId,
@@ -1151,7 +1497,7 @@ export default class ExperimentRepository {
       id: row.id,
       experimentId: row.experimentId,
       scenarioId: row.scenarioId,
-      userName: row.user?.name ?? "Unknown User",
+      userName: (row.user as any)?.name ?? "Unknown User",
       experimentVersion: row.experimentVersion,
       eventType: row.eventType,
       oldValue: row.oldValue,
@@ -1160,158 +1506,112 @@ export default class ExperimentRepository {
     }));
   }
 
+  /** LAB-EX-04: a past version, as it was saved. */
   async getExperimentVersion(
     experimentId: string,
-    version: number
+    version: number,
+    userId: string
   ): Promise<ExperimentDetailed> {
-
-    const history = await OrmExperimentHistory.findAll({
-      where: {
-        experimentId,
-        experimentVersion: {
-          [Op.lte]: version,
-        },
-      },
-      order: [
-        ["experimentVersion", "ASC"],
-        ["createdAt", "ASC"],
-      ],
-    });
-
-    const snapshotEvent = history.find(
-      h =>
-        h.eventType === "experiment_created" ||
-        h.eventType === "experiment_copied"
+    const { experiment: current, role } = await this.ensureExperimentPermission(
+      experimentId,
+      userId,
+      "read",
+      undefined,
+      true
     );
 
-    if (!snapshotEvent?.newValue) {
-      throw new Error("No snapshot found");
+    const stored = Number.isInteger(version)
+      ? await OrmExperimentVersion.findOne({ where: { experimentId, version } })
+      : null;
+
+    if (!stored) {
+      throw new NotFoundError("Version not found.");
     }
 
-    const snapshot = structuredClone(snapshotEvent.newValue);
-
-    for (const event of history) {
-
-      switch (event.eventType) {
-
-        case "name_updated":
-          snapshot.name = event.newValue;
-          break;
-
-        case "description_updated":
-          snapshot.description = event.newValue;
-          break;
-
-        case "hypothesis_updated":
-          snapshot.hypothesis = event.newValue;
-          break;
-
-        case "labels_updated":
-          snapshot.labels = event.newValue;
-          break;
-
-        case "metrics_updated":
-          snapshot.metrics = event.newValue;
-          break;
-
-        case "scenario_added":
-          snapshot.scenarios.push({
-            id: event.scenarioId,
-            ...event.newValue,
-          });
-          break;
-
-        case "scenario_removed":
-          snapshot.scenarios = snapshot.scenarios.filter(
-            (s: any) => s.id !== event.scenarioId
-          );
-          break;
-
-        case "scenario_model_updated": {
-          const scenario = snapshot.scenarios.find(
-            (s: any) => s.id === event.scenarioId
-          );
-
-          if (scenario) {
-            scenario.modelId = event.newValue;
-          }
-          break;
-        }
-
-        case "scenario_solver_config_updated": {
-          const scenario = snapshot.scenarios.find(
-            (s: any) => s.id === event.scenarioId
-          );
-
-          if (scenario) {
-            scenario.solverConfig = event.newValue;
-          }
-          break;
-        }
-      }
-    }
+    const snapshot = stored.config;
 
     const experiment = new ExperimentDetailed(
       experimentId,
       snapshot.name,
       version,
       snapshot.labels ?? [],
-      snapshot.status,
-      ExperimentRoleEnum.VIEWER,
-      snapshot.isTemplate,
-      snapshot.isBenchmark,
+      current.status,
+      role,
+      current.isTemplate,
+      current.isBenchmark,
       snapshot.description,
       snapshot.hypothesis,
-      new Date(),
-      new Date()
+      stored.createdAt,
+      stored.createdAt
     );
+    experiment.projectId = snapshot.projectId !== undefined ? snapshot.projectId : current.projectId ?? null;
 
-  experiment.scenarios = (snapshot.scenarios ?? []).map(
-    (scenario: any) =>
+    const modelIdsOf = (scenario: ExperimentConfigSnapshot["scenarios"][number]) =>
+      scenario.modelIds ?? (scenario.modelId ? [scenario.modelId] : []);
+    const modelIds = [...new Set(snapshot.scenarios.flatMap(modelIdsOf))];
+    const models = modelIds.length ? await OrmModel.findAll({ where: { id: modelIds } }) : [];
+
+    experiment.scenarios = snapshot.scenarios.map((scenario) =>
       new Scenario(
         scenario.id,
         experimentId,
-        scenario.modelId,
-        scenario.model
-          ? ModelEntity.fromOrm(scenario.model)
-          : undefined,
-        scenario.solverConfig
+        modelIdsOf(scenario).map((modelId) => {
+          const model = models.find((m) => m.id === modelId);
+          return { modelId, model: model ? ModelEntity.fromOrm(model) : undefined };
+        }),
+        scenario.solverConfigs,
+        scenario.name,
+        scenario.operationalContext
       )
-  );
+    );
 
-  experiment.metrics = (snapshot.metrics ?? []).map(
-    (metric: any) =>
-      new Metric(
-        metric.id,
-        metric.name,
-        metric.formula,
-        metric.unit,
-        metric.script,
-        metric.description,
-        metric.userId
-      )
-  );
+    const metrics = snapshot.metricIds.length
+      ? await OrmMetric.findAll({ where: { id: snapshot.metricIds } })
+      : [];
 
-  experiment.author = snapshot.author ?? "";
-  experiment.userRole = ExperimentRoleEnum.VIEWER;
+    experiment.metrics = metrics.map(
+      (metric) =>
+        new Metric(
+          metric.id,
+          metric.name,
+          metric.formula,
+          metric.unit,
+          metric.script,
+          metric.createdAt,
+          metric.updatedAt,
+          metric.description,
+          metric.userId
+        )
+    );
 
-  return experiment;
-}
+    return experiment;
+  }
+
+  /** LAB-EX-04: restoring a version saves its configuration as a new version. */
+  async restoreExperimentVersion(experimentId: string, version: number, userId: string): Promise<ExperimentDetailed> {
+    const old = await this.getExperimentVersion(experimentId, version, userId);
+
+    return this.updateExperiment(
+      {
+        id: experimentId,
+        name: old.name,
+        description: old.description ?? "",
+        hypothesis: old.hypothesis ?? "",
+        projectId: old.projectId,
+        labels: old.labels,
+        metricIds: old.metrics.map((metric) => metric.id),
+        scenarios: old.scenarios.map(toScenarioInput),
+      },
+      userId,
+      version
+    );
+  }
 
   public async getCollaborators(
     experimentId: string,
     userId: string
   ): Promise<Collaborator[]> {
-    await this.ensureExperimentPermission(
-      experimentId,
-      userId,
-      [
-        ExperimentRoleEnum.OWNER,
-        ExperimentRoleEnum.DIRECTOR,
-        ExperimentRoleEnum.EDITOR,
-        ExperimentRoleEnum.VIEWER,
-      ]
-    );
+    await this.ensureExperimentPermission(experimentId, userId, "read");
 
     const collaborators = await OrmExperimentUser.findAll({
       where: { experimentId },
@@ -1325,10 +1625,11 @@ export default class ExperimentRepository {
     });
 
     return collaborators.map((collaborator) => ({
-      id: collaborator.user!.id,
-      name: collaborator.user!.name,
-      email: collaborator.user!.email,
+      id: (collaborator.user as any)?.id ?? collaborator.userId!,
+      name: (collaborator.user as any)?.name ?? "",
+      email: (collaborator.user as any)?.email ?? "",
       role: collaborator.role!,
+      permissions: permissionsOf({ role: collaborator.role!, canWrite: collaborator.canWrite, canExecute: collaborator.canExecute }),
     }));
   }
 
@@ -1337,31 +1638,50 @@ export default class ExperimentRepository {
     collaboratorId: string,
     userId: string
   ): Promise<void> {
-    await this.ensureExperimentPermission(
-      experimentId,
-      userId,
-      [
-        ExperimentRoleEnum.OWNER,
-        ExperimentRoleEnum.DIRECTOR,
-      ]
-    );
+    const transaction = await sequelize.transaction();
 
-    const collaborator = await OrmExperimentUser.findOne({
-      where: {
+    try {
+      const { experiment } = await this.ensureExperimentPermission(
         experimentId,
-        userId: collaboratorId,
-      },
-    });
+        userId,
+        "manage",
+        transaction
+      );
 
-    if (!collaborator) {
-      throw new Error("Collaborator not found.");
+      const collaborator = await OrmExperimentUser.findOne({
+        where: {
+          experimentId,
+          userId: collaboratorId,
+        },
+        transaction,
+      });
+
+      if (!collaborator) {
+        throw new NotFoundError("Collaborator not found.");
+      }
+
+      if (collaborator.role === ExperimentRoleEnum.OWNER) {
+        throw new ConflictError("Owner cannot be removed.");
+      }
+
+      await collaborator.destroy({ transaction });
+
+      await OrmExperimentHistory.create(
+        {
+          experimentId,
+          experimentVersion: experiment.version,
+          userId,
+          eventType: "collaborator_removed",
+          oldValue: { userId: collaboratorId, role: collaborator.role },
+        },
+        { transaction }
+      );
+
+      await transaction.commit();
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
     }
-
-    if (collaborator.role === ExperimentRoleEnum.OWNER) {
-      throw new Error("Owner cannot be removed.");
-    }
-
-    await collaborator.destroy();
   }
 
 }

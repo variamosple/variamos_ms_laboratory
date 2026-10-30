@@ -1,3 +1,4 @@
+import { Config } from "../../../Config";
 import Sequelize, { Model } from "sequelize";
 import sequelize from "../../../DataProviders/dataBase/VariamosORM";
 import { OrmExperiment } from "./Experiment";
@@ -11,6 +12,11 @@ export interface MetricAttributes {
   description?: string;
   script: string;
   userId?: string | null;
+  code?: string | null;
+  category?: string | null;
+  source?: string | null;
+  formulaOrigin?: "spec" | "proposed" | null;
+  requires?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -26,6 +32,11 @@ export class OrmMetric
   declare description?: string;
   declare script: string;
   declare userId?: string | null;
+  declare code?: string | null;
+  declare category?: string | null;
+  declare source?: string | null;
+  declare formulaOrigin?: "spec" | "proposed" | null;
+  declare requires?: string | null;
   declare createdAt: Date;
   declare updatedAt: Date;
 }
@@ -56,9 +67,27 @@ OrmMetric.init(
       type: Sequelize.TEXT,
     },
     userId: {
-      type: Sequelize.UUID,
+      // variamos.user.id is a string
+      type: Sequelize.TEXT,
       allowNull: true,
       field: "user_id",
+    },
+    // LAB-MT-01 catalog: REQ code, family, origin of the definition, data the models need
+    code: {
+      type: Sequelize.TEXT,
+    },
+    category: {
+      type: Sequelize.TEXT,
+    },
+    source: {
+      type: Sequelize.TEXT,
+    },
+    formulaOrigin: {
+      type: Sequelize.TEXT,
+      field: "formula_origin",
+    },
+    requires: {
+      type: Sequelize.TEXT,
     },
     createdAt: {
       type: Sequelize.DATE,
@@ -73,7 +102,7 @@ OrmMetric.init(
     tableName: "metric",
     sequelize,
     freezeTableName: true,
-    schema: "variamos_laboratory_test",
+    schema: Config.DB.SCHEMA,
     createdAt: "created_at",
     updatedAt: "updated_at",
   }

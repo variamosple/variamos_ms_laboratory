@@ -20,6 +20,8 @@ const mockRepository = {
   publishAsBenchmark: jest.fn(),
   getExperimentHistory: jest.fn(),
   getExperimentVersion: jest.fn(),
+  restoreExperimentVersion: jest.fn(),
+  markReady: jest.fn(),
   getCollaborators: jest.fn(),
   removeCollaborator: jest.fn(),
 };
@@ -49,27 +51,34 @@ describe("ExperimentUseCase", () => {
     const experiment = { id: "experiment-1" } as any;
     mockRepository.saveExperiment.mockResolvedValue(experiment);
     mockRepository.updateExperiment.mockResolvedValue(experiment);
-    mockRepository.deleteExperiment.mockResolvedValue(true);
+    mockRepository.deleteExperiment.mockResolvedValue("deleted");
 
     await expect(useCase.saveExperiment(experiment, "user-1")).resolves.toBe(experiment);
     await expect(useCase.updateExperiment(experiment, "user-1")).resolves.toBe(experiment);
-    await expect(useCase.deleteExperiment("experiment-1", "user-1")).resolves.toBe(true);
+    await expect(useCase.deleteExperiment("experiment-1", "user-1")).resolves.toBe("deleted");
 
     expect(mockRepository.saveExperiment).toHaveBeenCalledWith(experiment, "user-1");
     expect(mockRepository.updateExperiment).toHaveBeenCalledWith(experiment, "user-1");
     expect(mockRepository.deleteExperiment).toHaveBeenCalledWith("experiment-1", "user-1");
   });
 
-  test("restores a version using the fetched version", async () => {
+  test("delegates version reading and restoring with the user", async () => {
     const version = { id: "experiment-1", version: 2 } as any;
     mockRepository.getExperimentVersion.mockResolvedValue(version);
-    mockRepository.updateExperiment.mockResolvedValue(version);
+    mockRepository.restoreExperimentVersion.mockResolvedValue(version);
 
-    await expect(useCase.restoreExperimentVersion("experiment-1", 2, "user-1"))
-      .resolves.toBe(version);
+    await expect(useCase.getExperimentVersion("experiment-1", 2, "user-1")).resolves.toBe(version);
+    await expect(useCase.restoreExperimentVersion("experiment-1", 2, "user-1")).resolves.toBe(version);
 
-    expect(mockRepository.getExperimentVersion).toHaveBeenCalledWith("experiment-1", 2);
-    expect(mockRepository.updateExperiment).toHaveBeenCalledWith(version, "user-1");
+    expect(mockRepository.getExperimentVersion).toHaveBeenCalledWith("experiment-1", 2, "user-1");
+    expect(mockRepository.restoreExperimentVersion).toHaveBeenCalledWith("experiment-1", 2, "user-1");
+  });
+
+  test("delegates the Ready transition", async () => {
+    mockRepository.markReady.mockResolvedValue({ status: "ready" });
+
+    await expect(useCase.markReady("experiment-1", "user-1")).resolves.toEqual({ status: "ready" });
+    expect(mockRepository.markReady).toHaveBeenCalledWith("experiment-1", "user-1");
   });
 
   test("passes sharing role and user to the repository", async () => {
@@ -87,8 +96,17 @@ describe("ExperimentUseCase", () => {
       "experiment-1",
       "editor@example.com",
       ExperimentRoleEnum.EDITOR,
-      "owner-1"
+      "owner-1",
+      undefined
     );
+  });
+
+  test("passes separate permissions to the repository (LAB-COL-01)", async () => {
+    mockRepository.shareExperiment.mockResolvedValue(true);
+
+    await useCase.shareExperiment("experiment-1", "runner@example.com", undefined, "owner-1", { write: false, execute: true });
+
+    expect(mockRepository.shareExperiment).toHaveBeenCalledWith("experiment-1", "runner@example.com", undefined, "owner-1", { write: false, execute: true });
   });
 
   test.each([

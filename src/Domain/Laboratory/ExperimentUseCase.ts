@@ -1,4 +1,4 @@
-import ExperimentRepository from "../../DataProviders/repository/Laboratory/ExperimentRepository";
+import ExperimentRepository, { ExperimentInput } from "../../DataProviders/repository/Laboratory/ExperimentRepository";
 import { Experiment, ExperimentDetailed } from "./Entities/Experiment";
 import { ExperimentFilter } from "./Entities/ExperimentFilter";
 import { ExperimentRoleEnum } from "./Entities/ExperimentUser";
@@ -48,19 +48,23 @@ export default class ExperimentUseCase {
     return this.experimentRepository.getArchivedExperiments(request);
   }
 
-  async saveExperiment(experiment: ExperimentDetailed, userId: string) {
+  async saveExperiment(experiment: ExperimentInput, userId: string) {
     return this.experimentRepository.saveExperiment(experiment, userId);
   }
 
   async getExperimentDetailed(id: string, userId: string) {
     return this.experimentRepository.getExperimentDetailed(id, userId);
   }
-  async updateExperiment(experiment: ExperimentDetailed, userId: string) {
+  async updateExperiment(experiment: ExperimentInput, userId: string) {
     return this.experimentRepository.updateExperiment(experiment, userId);
   }
 
   async deleteExperiment(id: string, userId: string) {
     return this.experimentRepository.deleteExperiment(id, userId);
+  }
+
+  async markReady(id: string, userId: string) {
+    return this.experimentRepository.markReady(id, userId);
   }
 
   async archiveExperiment(id: string, userId: string) {
@@ -71,19 +75,25 @@ export default class ExperimentUseCase {
     return await this.experimentRepository.restoreExperiment(id, userId);
   }
 
-  async shareExperiment(experimentId: string, userEmail: string, role: ExperimentRoleEnum, userId: string) {
-    return await this.experimentRepository.shareExperiment(experimentId, userEmail, role, userId);
+  async shareExperiment(
+    experimentId: string,
+    userEmail: string,
+    role: ExperimentRoleEnum | undefined,
+    userId: string,
+    permissions?: { write?: boolean; execute?: boolean }
+  ) {
+    return await this.experimentRepository.shareExperiment(experimentId, userEmail, role, userId, permissions);
   }
 
-  async copyExperiment(experimentId: string, userId: string) {
-    return await this.experimentRepository.copyExperiment(experimentId, userId);
+  async copyExperiment(experimentId: string, userId: string, projectId?: string) {
+    return await this.experimentRepository.copyExperiment(experimentId, userId, projectId);
   }
 
-  async publishAsTemplate(id: string, userId: string): Promise<Experiment | null> {
+  async publishAsTemplate(id: string, userId: string): Promise<ExperimentDetailed> {
     return await this.experimentRepository.publishAsTemplate(id, userId);
   }
 
-  async publishAsBenchmark(id: string, userId: string): Promise<Experiment | null> {
+  async publishAsBenchmark(id: string, userId: string): Promise<ExperimentDetailed> {
     return await this.experimentRepository.publishAsBenchmark(id, userId);
   }
 
@@ -91,13 +101,12 @@ export default class ExperimentUseCase {
     return await this.experimentRepository.getExperimentHistory(experimentId, userId);
   }
 
-  async getExperimentVersion(experimentId: string, version: number) {
-    return await this.experimentRepository.getExperimentVersion(experimentId, version);
+  async getExperimentVersion(experimentId: string, version: number, userId: string) {
+    return await this.experimentRepository.getExperimentVersion(experimentId, version, userId);
   }
 
   async restoreExperimentVersion(experimentId: string, version: number, userId: string) {
-    const experimentVersion = await this.experimentRepository.getExperimentVersion(experimentId, version);
-    return await this.experimentRepository.updateExperiment(experimentVersion, userId);
+    return await this.experimentRepository.restoreExperimentVersion(experimentId, version, userId);
   }
 
   async getCollaborators(experimentId: string, userId: string) {

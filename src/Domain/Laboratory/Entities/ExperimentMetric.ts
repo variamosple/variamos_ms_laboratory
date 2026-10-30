@@ -1,3 +1,4 @@
+import { Config } from "../../../Config";
 import Sequelize, { Model } from "sequelize";
 import sequelize from "../../../DataProviders/dataBase/VariamosORM";
 
@@ -31,7 +32,7 @@ OrmExperimentMetric.init(
   },
   {
     sequelize,
-    schema: "variamos_laboratory_test",
+    schema: Config.DB.SCHEMA,
     tableName: "experiment_metric",
     freezeTableName: true,
     createdAt: false,

@@ -18,6 +18,7 @@ export interface ModelAttributes {
   source?: string;
 
   model: any;
+  isDeleted?: boolean;
 }
 
 export class OrmModel
@@ -35,17 +36,19 @@ export class OrmModel
   declare author?: string;
   declare source?: string;
   declare model: any;
+  declare isDeleted?: boolean;
 }
 
 OrmModel.init(
   {
+    // ids are strings in vms_projects, not always UUIDs
     id: {
-      type: Sequelize.UUID,
+      type: Sequelize.TEXT,
       primaryKey: true,
       allowNull: false,
     },
     projectId: {
-      type: Sequelize.UUID,
+      type: Sequelize.TEXT,
       allowNull: false,
       field: "project_id",
     },
@@ -82,6 +85,10 @@ OrmModel.init(
     model: {
       type: Sequelize.JSONB,
       allowNull: false,
+    },
+    isDeleted: {
+      type: Sequelize.BOOLEAN,
+      field: "is_deleted",
     },
   },
   {
@@ -141,10 +148,4 @@ export class ModelEntity {
       sourceModelIds: ormModel.model.sourceModelIds ?? [],
     });
   }
-}
-
-export function SearchModelById(id: string) {
-  const query =
-    "select * from variamos.sp_view_model('" + id + "')";
-  return sequelize.query(query);
 }

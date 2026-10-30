@@ -1,415 +1,206 @@
-import { Router } from "express";
+import { Request, Response, Router } from "express";
 import ExperimentUseCase from "../Domain/Laboratory/ExperimentUseCase";
 import { isAuthenticated } from "@variamosple/variamos-security";
-import { ExperimentDetailed } from "../Domain/Laboratory/Entities/Experiment";
+import { Experiment } from "../Domain/Laboratory/Entities/Experiment";
 import { ExperimentFilter } from "../Domain/Laboratory/Entities/ExperimentFilter";
 
 import { RequestModel } from "../Domain/Core/Entities/RequestModel";
 import { ResponseModel } from "../Domain/Core/Entities/ResponseModel";
+import { sendError } from "./sendError";
 
 const router = Router();
 const experimentUseCase = new ExperimentUseCase();
 
 export const EXPERIMENTS_ROUTE = "/experiments";
 
-router.get("/", isAuthenticated, async (req, res) => {
-  const transactionId = "getUserExperiments";
+const positiveInt = (value: unknown): number | undefined => {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+};
 
-  const { pageNumber, pageSize, name = null,  } = req.query;
+/** Paged list of experiments for the signed-in user, filtered by name and project. */
+const listRoute =
+  (
+    transactionId: string,
+    query: (request: RequestModel<ExperimentFilter>) => Promise<ResponseModel<Experiment[]>>
+  ) =>
+  async (req: Request, res: Response) => {
+    const { pageNumber, pageSize, name, projectId, researcher, status, createdFrom, createdTo, type } = req.query;
+    const text = (value: unknown) => (typeof value === "string" && value !== "" ? value : undefined);
 
-  try {
-    console.log("req.user =", req.user);
-    console.log("req.user.id =", req.user?.id);
-    const filter = ExperimentFilter.builder()
-      .setUserId(req.user?.id!)
-      .setName(name as string)
-      .setPageNumber(pageNumber as unknown as number)
-      .setPageSize(pageSize as unknown as number)
-      .build();
+    try {
+      const filter = ExperimentFilter.builder()
+        .setUserId(req.user?.id!)
+        .setName(typeof name === "string" ? name : "")
+        .setPageNumber(positiveInt(pageNumber)!)
+        .setPageSize(positiveInt(pageSize)!)
+        .setProjectId(text(projectId))
+        .setFilters({
+          researcher: text(researcher),
+          status: text(status),
+          createdFrom: text(createdFrom) && !Number.isNaN(Date.parse(String(createdFrom))) ? String(createdFrom) : undefined,
+          createdTo: text(createdTo) && !Number.isNaN(Date.parse(String(createdTo))) ? String(createdTo) : undefined,
+          type: ["experiment", "template", "benchmark"].includes(String(type)) ? (type as any) : undefined,
+        })
+        .build();
 
-    const request = new RequestModel<ExperimentFilter>(
-      transactionId,
-      filter
-    );
+      const response = await query(new RequestModel<ExperimentFilter>(transactionId, filter));
 
-    const response =
-      await experimentUseCase.getUserExperiments(request);
+      res.status(response.errorCode || 200).json(response);
+    } catch (error) {
+      sendError(res, transactionId, error);
+    }
+  };
 
-    res.status(response.errorCode || 200).json(response);
-
-  } catch (error) {
-    console.error("Error:", error);
-
-    res.status(500).json(
-      new ResponseModel(transactionId, 500, "Internal Server Error")
-    );
-  }
-});
-
-router.get("/shared", isAuthenticated, async (req, res) => {
-  const transactionId = "getSharedExperiments";
-
-  const { pageNumber, pageSize, name = null } = req.query;
-
-  try {
-    const filter = ExperimentFilter.builder()
-      .setUserId(req.user?.id!)
-      .setName(name as string)
-      .setPageNumber(pageNumber as unknown as number)
-      .setPageSize(pageSize as unknown as number)
-      .build();
-
-    const request = new RequestModel<ExperimentFilter>(
-      transactionId,
-      filter
-    );
-
-    const response =
-      await experimentUseCase.getSharedExperiments(request);
-
-    res.status(response.errorCode || 200).json(response);
-
-  } catch (error) {
-    console.error("Error:", error);
-
-    res.status(500).json(
-      new ResponseModel(transactionId, 500, "Internal Server Error")
-    );
-  }
-});
-
-router.get("/groups", isAuthenticated, async (req, res) => {
-  const transactionId = "getGroupExperiments";
-
-  const { pageNumber, pageSize, name = null } = req.query;
-
-  try {
-    const filter = ExperimentFilter.builder()
-      .setUserId(req.user?.id!)
-      .setName(name as string)
-      .setPageNumber(pageNumber as unknown as number)
-      .setPageSize(pageSize as unknown as number)
-      .build();
-
-    const request = new RequestModel<ExperimentFilter>(
-      transactionId,
-      filter
-    );
-
-    const response =
-      await experimentUseCase.getGroupExperiments(request);
-
-    res.status(response.errorCode || 200).json(response);
-
-  } catch (error) {
-    console.error("Error:", error);
-
-    res.status(500).json(
-      new ResponseModel(transactionId, 500, "Internal Server Error")
-    );
-  }
-});
-
-router.get("/templates", isAuthenticated, async (req, res) => {
-  const transactionId = "getTemplateExperiments";
-
-  const { pageNumber, pageSize, name = null } = req.query;
-
-  try {
-    const filter = ExperimentFilter.builder()
-      .setName(name as string)
-      .setPageNumber(pageNumber as unknown as number)
-      .setPageSize(pageSize as unknown as number)
-      .build();
-
-    const request = new RequestModel<ExperimentFilter>(
-      transactionId,
-      filter
-    );
-
-    const response =
-      await experimentUseCase.getTemplateExperiments(request);
-
-    res.status(response.errorCode || 200).json(response);
-
-  } catch (error) {
-    console.error("Error:", error);
-
-    res.status(500).json(
-      new ResponseModel(transactionId, 500, "Internal Server Error")
-    );
-  }
-});
-
-router.get("/benchmarks", isAuthenticated, async (req, res) => {
-  const transactionId = "getTemplateBenchmarks";
-
-  const { pageNumber, pageSize, name = null } = req.query;
-
-  try {
-    const filter = ExperimentFilter.builder()
-      .setName(name as string)
-      .setPageNumber(pageNumber as unknown as number)
-      .setPageSize(pageSize as unknown as number)
-      .build();
-
-    const request = new RequestModel<ExperimentFilter>(
-      transactionId,
-      filter
-    );
-
-    const response =
-      await experimentUseCase.getTemplateBenchmarks(request);
-
-    res.status(response.errorCode || 200).json(response);
-
-  } catch (error) {
-    console.error("Error:", error);
-
-    res.status(500).json(
-      new ResponseModel(transactionId, 500, "Internal Server Error")
-    );
-  }
-});
-
-router.get("/archived", isAuthenticated, async (req, res) => {
-  const transactionId = "getArchivedExperiments";
-
-  const { pageNumber, pageSize, name = null } = req.query;
-
-  try {
-    const filter = ExperimentFilter.builder()
-      .setUserId(req.user?.id!)
-      .setName(name as string)
-      .setPageNumber(pageNumber as unknown as number)
-      .setPageSize(pageSize as unknown as number)
-      .build();
-
-    const request = new RequestModel<ExperimentFilter>(
-      transactionId,
-      filter
-    );
-
-    const response =
-      await experimentUseCase.getArchivedExperiments(request);
-
-    res.status(response.errorCode || 200).json(response);
-
-  } catch (error) {
-    console.error("Error:", error);
-
-    res.status(500).json(
-      new ResponseModel(transactionId, 500, "Internal Server Error")
-    );
-  }
-});
+router.get("/", isAuthenticated, listRoute("getUserExperiments", (r) => experimentUseCase.getUserExperiments(r)));
+router.get("/shared", isAuthenticated, listRoute("getSharedExperiments", (r) => experimentUseCase.getSharedExperiments(r)));
+router.get("/groups", isAuthenticated, listRoute("getGroupExperiments", (r) => experimentUseCase.getGroupExperiments(r)));
+router.get("/templates", isAuthenticated, listRoute("getTemplateExperiments", (r) => experimentUseCase.getTemplateExperiments(r)));
+router.get("/benchmarks", isAuthenticated, listRoute("getTemplateBenchmarks", (r) => experimentUseCase.getTemplateBenchmarks(r)));
+router.get("/archived", isAuthenticated, listRoute("getArchivedExperiments", (r) => experimentUseCase.getArchivedExperiments(r)));
 
 router.post("/", isAuthenticated, async (req, res) => {
-  const transactionId = "createExperiment";
-
   try {
-    const experiment = req.body as ExperimentDetailed;
-
-    const created = await experimentUseCase.saveExperiment(
-      experiment,
-      req.user?.id!
-    );
-
-    res.status(201).json(created);
-
+    res.status(201).json(await experimentUseCase.saveExperiment(req.body ?? {}, req.user?.id!));
   } catch (error) {
-    console.error("Error:", error);
-
-    res.status(500).json(
-      new ResponseModel(transactionId, 500, "Internal Server Error")
-    );
+    sendError(res, "createExperiment", error);
   }
 });
 
 router.get("/:id/detailed", isAuthenticated, async (req, res) => {
   try {
-    const experiment = await experimentUseCase.getExperimentDetailed(req.params.id, req.user?.id!);
-
-    if (!experiment) {
-      return res.status(404).json({
-        message: "Experiment not found",
-      });
-    }
-    res.status(200).json(experiment);
+    res.status(200).json(await experimentUseCase.getExperimentDetailed(req.params.id, req.user?.id!));
   } catch (error) {
-    console.error(error);
-    res.status(500).json({
-      message: "Internal Server Error",
-    });
+    sendError(res, "getExperimentDetailed", error);
+  }
+});
+
+/** LAB-EX-07: Draft -> Ready, with the validation of LAB-RUN-01. */
+router.put("/:id/ready", isAuthenticated, async (req, res) => {
+  try {
+    res.status(200).json(await experimentUseCase.markReady(req.params.id, req.user?.id!));
+  } catch (error) {
+    sendError(res, "markExperimentReady", error);
   }
 });
 
 router.put("/:id/archive", isAuthenticated, async (req, res) => {
   try {
-    const experiment = await experimentUseCase.archiveExperiment(req.params.id, req.user?.id!);
-
-    res.status(200).json(experiment);
+    res.status(200).json(await experimentUseCase.archiveExperiment(req.params.id, req.user?.id!));
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Internal Server Error" });
+    sendError(res, "archiveExperiment", error);
   }
 });
 
-
 router.put("/:id/restore", isAuthenticated, async (req, res) => {
   try {
-    const experiment = await experimentUseCase.restoreExperiment(req.params.id, req.user?.id!);
-
-    res.status(200).json(experiment);
+    res.status(200).json(await experimentUseCase.restoreExperiment(req.params.id, req.user?.id!));
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Internal Server Error" });
+    sendError(res, "restoreExperiment", error);
   }
 });
 
 router.put("/:id", isAuthenticated, async (req, res) => {
-    try {
-        const experiment: ExperimentDetailed = {
-            ...req.body,
-            id: req.params.id,
-        }
-        console.log("Updating experiment id:", experiment.id);
-        const updatedExperiment = await experimentUseCase.updateExperiment(experiment, req.user?.id!);
-        res.status(200).json(updatedExperiment);
-    } catch (error) {
-        console.error("Error updating experiment:", error);
-
-        res.status(500).json({
-            message: "Failed to update experiment.",
-            error,
-        });
-    }
+  try {
+    const experiment = { ...(req.body ?? {}), id: req.params.id };
+    res.status(200).json(await experimentUseCase.updateExperiment(experiment, req.user?.id!));
+  } catch (error) {
+    sendError(res, "updateExperiment", error);
+  }
 });
 
 router.post("/:id/share", isAuthenticated, async (req, res) => {
   try {
-    const {
-      userEmail,
-      role,
-    } = req.body;
-
-    const result = await experimentUseCase.shareExperiment(
-      req.params.id,
-      userEmail,
-      role,
-      req.user?.id!
+    const { userEmail, role, permissions } = req.body ?? {};
+    res.status(200).json(
+      await experimentUseCase.shareExperiment(
+        req.params.id,
+        userEmail,
+        role,
+        req.user?.id!,
+        permissions && typeof permissions === "object" ? { write: permissions.write === true, execute: permissions.execute === true } : undefined
+      )
     );
-
-    res.status(200).json(result);
-
   } catch (error) {
-    console.error(error);
-    res.status(500).json({
-      message: "Internal Server Error",
-    });
+    sendError(res, "shareExperiment", error);
   }
 });
 
 router.post("/:id/copy", isAuthenticated, async (req, res) => {
   try {
-    const experiment = await experimentUseCase.copyExperiment(
-      req.params.id,
-      req.user?.id!
-    );
-
-    res.status(201).json(experiment);
+    const projectId = typeof req.body?.projectId === "string" ? req.body.projectId : undefined;
+    res.status(201).json(await experimentUseCase.copyExperiment(req.params.id, req.user?.id!, projectId));
   } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      message: "Internal Server Error",
-    });
+    sendError(res, "copyExperiment", error);
   }
 });
 
 router.post("/:id/publish/template", isAuthenticated, async (req, res) => {
-    try {
-        const experiment = await experimentUseCase.publishAsTemplate(
-            req.params.id,
-            req.user!.id
-        );
-
-        res.status(200).json(experiment);
-    } catch (error: any) {
-        console.error(error);
-
-        res.status(400).json({
-            message: error.message,
-        });
-    }
+  try {
+    res.status(200).json(await experimentUseCase.publishAsTemplate(req.params.id, req.user!.id));
+  } catch (error) {
+    sendError(res, "publishAsTemplate", error);
+  }
 });
 
 router.post("/:id/publish/benchmark", isAuthenticated, async (req, res) => {
-    try {
-        const experiment = await experimentUseCase.publishAsBenchmark(
-            req.params.id,
-            req.user!.id
-        );
-
-        res.status(200).json(experiment);
-    } catch (error: any) {
-        console.error(error);
-
-        res.status(400).json({
-            message: error.message,
-        });
-    }
+  try {
+    res.status(200).json(await experimentUseCase.publishAsBenchmark(req.params.id, req.user!.id));
+  } catch (error) {
+    sendError(res, "publishAsBenchmark", error);
+  }
 });
 
+/** LAB-EX-05: logical deletion; an experiment with completed executions is archived instead. */
 router.delete("/:id", isAuthenticated, async (req, res) => {
   try {
-    await experimentUseCase.deleteExperiment(req.params.id, req.user?.id!);
-    res.status(200).json({ message: "Experiment deleted successfully." });
+    const result = await experimentUseCase.deleteExperiment(req.params.id, req.user?.id!);
+    res.status(200).json({
+      result,
+      message: result === "archived"
+        ? "The experiment has completed executions: it was archived instead of deleted."
+        : "Experiment deleted successfully.",
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Internal Server Error" });
+    sendError(res, "deleteExperiment", error);
   }
 });
 
 router.get("/:id/history", isAuthenticated, async (req, res) => {
   try {
-    const history = await experimentUseCase.getExperimentHistory(req.params.id, req.user?.id!);
-    res.status(200).json(history);
+    res.status(200).json(await experimentUseCase.getExperimentHistory(req.params.id, req.user?.id!));
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Internal Server Error" });
+    sendError(res, "getExperimentHistory", error);
   }
 });
 
 router.get("/:id/version/:version", isAuthenticated, async (req, res) => {
   try {
-    const version = parseInt(req.params.version, 10);
-    const experimentVersion = await experimentUseCase.getExperimentVersion(req.params.id, version);
-    res.status(200).json(experimentVersion);
+    const version = Number.parseInt(req.params.version, 10);
+    res.status(200).json(
+      await experimentUseCase.getExperimentVersion(req.params.id, version, req.user?.id!)
+    );
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Internal Server Error" });
+    sendError(res, "getExperimentVersion", error);
   }
 });
 
 router.post("/:id/version/:version/restore", isAuthenticated, async (req, res) => {
   try {
-    const version = parseInt(req.params.version, 10);
-    const restoredExperiment = await experimentUseCase.restoreExperimentVersion(req.params.id, version, req.user?.id!);
-    res.status(200).json(restoredExperiment);
+    const version = Number.parseInt(req.params.version, 10);
+    res.status(200).json(
+      await experimentUseCase.restoreExperimentVersion(req.params.id, version, req.user?.id!)
+    );
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Internal Server Error" });
+    sendError(res, "restoreExperimentVersion", error);
   }
 });
 
 router.get("/:id/collaborators", isAuthenticated, async (req, res) => {
   try {
-    const collaborators = await experimentUseCase.getCollaborators(req.params.id, req.user?.id!);
-    res.status(200).json(collaborators);
+    res.status(200).json(await experimentUseCase.getCollaborators(req.params.id, req.user?.id!));
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Internal Server Error" });
+    sendError(res, "getCollaborators", error);
   }
 });
 
@@ -418,8 +209,7 @@ router.delete("/:id/collaborators/:collaboratorId", isAuthenticated, async (req,
     await experimentUseCase.removeCollaborator(req.params.id, req.params.collaboratorId, req.user?.id!);
     res.status(200).json({ message: "Collaborator removed successfully." });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Internal Server Error" });
+    sendError(res, "removeCollaborator", error);
   }
 });
 

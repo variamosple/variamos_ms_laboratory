@@ -1,4 +1,4 @@
-import { User } from "../../Session/Entities/User";
+import { User } from "./User";
 
 test("keeps the user identity fields", () => {
   expect(new User("user-1", "alice", "Alice", "alice@example.com")).toEqual({

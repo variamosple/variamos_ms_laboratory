@@ -1,20 +1,40 @@
+import { Config } from "../../../Config";
 import Sequelize, { Model } from "sequelize";
 import sequelize from "../../../DataProviders/dataBase/VariamosORM";
 import { Optional } from "sequelize";
-import { OrmUser } from "../../User/Entities/User";
+import { User } from "../../Session/Entities/User";
 
 export type ExperimentHistoryEventType =
     | "experiment_created"
     | "name_updated"
     | "description_updated"
     | "hypothesis_updated"
+    | "project_updated"
     | "labels_updated"
     | "metrics_updated"
     | "scenario_added"
     | "scenario_removed"
     | "scenario_model_updated"
     | "scenario_solver_config_updated"
-    | "experiment_copied";
+    | "scenario_updated"
+    | "experiment_copied"
+    // LAB-NF-06: every operation is audited, not only configuration changes
+    | "status_changed"
+    | "experiment_archived"
+    | "experiment_restored"
+    | "experiment_deleted"
+    | "version_restored"
+    | "published_as_template"
+    | "published_as_benchmark"
+    | "collaborator_shared"
+    | "collaborator_removed"
+    // P2: runs (LAB-RUN-01, LAB-RUN-03, LAB-RUN-04)
+    | "run_started"
+    | "run_completed"
+    | "run_failed"
+    | "run_cancelled"
+    // P4: rebuilt from a reproducibility package (LAB-RP-01)
+    | "experiment_reproduced";
 
 export interface ExperimentHistoryAttributes {
     id?: string;
@@ -46,7 +66,7 @@ export class OrmExperimentHistory extends Model<
     declare experimentId: string;
     declare scenarioId?: string;
     declare userId?: string;
-    declare user?: OrmUser;
+    declare user?: User;
     declare experimentVersion: number;
     declare eventType: ExperimentHistoryEventType;
 
@@ -103,7 +123,7 @@ OrmExperimentHistory.init(
     },
     {
         sequelize,
-        schema: "variamos_laboratory_test",
+        schema: Config.DB.SCHEMA,
         tableName: "experiment_history",
         freezeTableName: true,
         updatedAt: false,

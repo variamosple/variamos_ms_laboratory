@@ -1,6 +1,7 @@
+import { Config } from "../../../Config";
 import Sequelize, { Model } from "sequelize";
 import sequelize from "../../../DataProviders/dataBase/VariamosORM";
-import { OrmUser } from "../../User/Entities/User";
+import { User } from "../../Session/Entities/User";
 
 export enum ExperimentRoleEnum {
     OWNER = "owner",
@@ -13,6 +14,9 @@ export interface ExperimentUserAttributes {
   experimentId?: string;
   userId?: string;
   role?: ExperimentRoleEnum;
+  /** LAB-COL-01: given to a shared user; owners and directors may always write and execute. */
+  canWrite?: boolean;
+  canExecute?: boolean;
   createdAt?: Date;
 }
 
@@ -23,9 +27,11 @@ export class OrmExperimentUser
   declare experimentId?: string;
   declare userId?: string;
   declare role?: ExperimentRoleEnum;
+  declare canWrite?: boolean;
+  declare canExecute?: boolean;
   declare createdAt?: Date;
 
-  declare user?: OrmUser;
+  declare user?: User;
 }
 
 OrmExperimentUser.init(
@@ -52,6 +58,18 @@ OrmExperimentUser.init(
       allowNull: false,
       defaultValue: "viewer",
     },
+    canWrite: {
+      type: Sequelize.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      field: "can_write",
+    },
+    canExecute: {
+      type: Sequelize.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      field: "can_execute",
+    },
     createdAt: {
       type: Sequelize.DATE,
       field: "created_at",
@@ -61,7 +79,7 @@ OrmExperimentUser.init(
     tableName: "experiment_user",
     sequelize,
     freezeTableName: true,
-    schema: "variamos_laboratory_test",
+    schema: Config.DB.SCHEMA,
 
     timestamps: true,
     createdAt: "created_at",
@@ -115,4 +133,6 @@ export type Collaborator = {
   name: string;
   email: string;
   role: ExperimentRoleEnum;
+  /** LAB-COL-01 */
+  permissions: { read: boolean; write: boolean; execute: boolean; manage: boolean };
 };
