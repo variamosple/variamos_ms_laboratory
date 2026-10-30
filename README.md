@@ -8,7 +8,9 @@ and `src/EntryPoints/contract.test.ts` fails if a route is added without being d
 
 Every route except `/health` needs a VariaMos session: a token signed by the Administration module,
 as a `Bearer` header or the `authToken` cookie. The service verifies it with the public key at
-`VARIAMOS_PUBLIC_KEY_PATH`.
+`VARIAMOS_PUBLIC_KEY_PATH`. The session must also hold the permission `laboratory::access`
+(`src/EntryPoints/laboratoryAccess.ts`), given at first to the Administrator role only: other accounts
+get 403 before any work, so that they cannot load the server with runs.
 
 ## Database
 

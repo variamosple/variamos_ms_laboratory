@@ -1,6 +1,6 @@
 import { Request, Response, Router } from "express";
 import ExperimentUseCase from "../Domain/Laboratory/ExperimentUseCase";
-import { isAuthenticated } from "@variamosple/variamos-security";
+import { hasLaboratoryAccess } from "./laboratoryAccess";
 import { Experiment } from "../Domain/Laboratory/Entities/Experiment";
 import { ExperimentFilter } from "../Domain/Laboratory/Entities/ExperimentFilter";
 
@@ -52,14 +52,14 @@ const listRoute =
     }
   };
 
-router.get("/", isAuthenticated, listRoute("getUserExperiments", (r) => experimentUseCase.getUserExperiments(r)));
-router.get("/shared", isAuthenticated, listRoute("getSharedExperiments", (r) => experimentUseCase.getSharedExperiments(r)));
-router.get("/groups", isAuthenticated, listRoute("getGroupExperiments", (r) => experimentUseCase.getGroupExperiments(r)));
-router.get("/templates", isAuthenticated, listRoute("getTemplateExperiments", (r) => experimentUseCase.getTemplateExperiments(r)));
-router.get("/benchmarks", isAuthenticated, listRoute("getTemplateBenchmarks", (r) => experimentUseCase.getTemplateBenchmarks(r)));
-router.get("/archived", isAuthenticated, listRoute("getArchivedExperiments", (r) => experimentUseCase.getArchivedExperiments(r)));
+router.get("/", hasLaboratoryAccess, listRoute("getUserExperiments", (r) => experimentUseCase.getUserExperiments(r)));
+router.get("/shared", hasLaboratoryAccess, listRoute("getSharedExperiments", (r) => experimentUseCase.getSharedExperiments(r)));
+router.get("/groups", hasLaboratoryAccess, listRoute("getGroupExperiments", (r) => experimentUseCase.getGroupExperiments(r)));
+router.get("/templates", hasLaboratoryAccess, listRoute("getTemplateExperiments", (r) => experimentUseCase.getTemplateExperiments(r)));
+router.get("/benchmarks", hasLaboratoryAccess, listRoute("getTemplateBenchmarks", (r) => experimentUseCase.getTemplateBenchmarks(r)));
+router.get("/archived", hasLaboratoryAccess, listRoute("getArchivedExperiments", (r) => experimentUseCase.getArchivedExperiments(r)));
 
-router.post("/", isAuthenticated, async (req, res) => {
+router.post("/", hasLaboratoryAccess, async (req, res) => {
   try {
     res.status(201).json(await experimentUseCase.saveExperiment(req.body ?? {}, req.user?.id!));
   } catch (error) {
@@ -67,7 +67,7 @@ router.post("/", isAuthenticated, async (req, res) => {
   }
 });
 
-router.get("/:id/detailed", isAuthenticated, async (req, res) => {
+router.get("/:id/detailed", hasLaboratoryAccess, async (req, res) => {
   try {
     res.status(200).json(await experimentUseCase.getExperimentDetailed(req.params.id, req.user?.id!));
   } catch (error) {
@@ -76,7 +76,7 @@ router.get("/:id/detailed", isAuthenticated, async (req, res) => {
 });
 
 /** LAB-EX-07: Draft -> Ready, with the validation of LAB-RUN-01. */
-router.put("/:id/ready", isAuthenticated, async (req, res) => {
+router.put("/:id/ready", hasLaboratoryAccess, async (req, res) => {
   try {
     res.status(200).json(await experimentUseCase.markReady(req.params.id, req.user?.id!));
   } catch (error) {
@@ -84,7 +84,7 @@ router.put("/:id/ready", isAuthenticated, async (req, res) => {
   }
 });
 
-router.put("/:id/archive", isAuthenticated, async (req, res) => {
+router.put("/:id/archive", hasLaboratoryAccess, async (req, res) => {
   try {
     res.status(200).json(await experimentUseCase.archiveExperiment(req.params.id, req.user?.id!));
   } catch (error) {
@@ -92,7 +92,7 @@ router.put("/:id/archive", isAuthenticated, async (req, res) => {
   }
 });
 
-router.put("/:id/restore", isAuthenticated, async (req, res) => {
+router.put("/:id/restore", hasLaboratoryAccess, async (req, res) => {
   try {
     res.status(200).json(await experimentUseCase.restoreExperiment(req.params.id, req.user?.id!));
   } catch (error) {
@@ -100,7 +100,7 @@ router.put("/:id/restore", isAuthenticated, async (req, res) => {
   }
 });
 
-router.put("/:id", isAuthenticated, async (req, res) => {
+router.put("/:id", hasLaboratoryAccess, async (req, res) => {
   try {
     const experiment = { ...(req.body ?? {}), id: req.params.id };
     res.status(200).json(await experimentUseCase.updateExperiment(experiment, req.user?.id!));
@@ -109,7 +109,7 @@ router.put("/:id", isAuthenticated, async (req, res) => {
   }
 });
 
-router.post("/:id/share", isAuthenticated, async (req, res) => {
+router.post("/:id/share", hasLaboratoryAccess, async (req, res) => {
   try {
     const { userEmail, role, permissions } = req.body ?? {};
     res.status(200).json(
@@ -126,7 +126,7 @@ router.post("/:id/share", isAuthenticated, async (req, res) => {
   }
 });
 
-router.post("/:id/copy", isAuthenticated, async (req, res) => {
+router.post("/:id/copy", hasLaboratoryAccess, async (req, res) => {
   try {
     const projectId = typeof req.body?.projectId === "string" ? req.body.projectId : undefined;
     res.status(201).json(await experimentUseCase.copyExperiment(req.params.id, req.user?.id!, projectId));
@@ -135,7 +135,7 @@ router.post("/:id/copy", isAuthenticated, async (req, res) => {
   }
 });
 
-router.post("/:id/publish/template", isAuthenticated, async (req, res) => {
+router.post("/:id/publish/template", hasLaboratoryAccess, async (req, res) => {
   try {
     res.status(200).json(await experimentUseCase.publishAsTemplate(req.params.id, req.user!.id));
   } catch (error) {
@@ -143,7 +143,7 @@ router.post("/:id/publish/template", isAuthenticated, async (req, res) => {
   }
 });
 
-router.post("/:id/publish/benchmark", isAuthenticated, async (req, res) => {
+router.post("/:id/publish/benchmark", hasLaboratoryAccess, async (req, res) => {
   try {
     res.status(200).json(await experimentUseCase.publishAsBenchmark(req.params.id, req.user!.id));
   } catch (error) {
@@ -152,7 +152,7 @@ router.post("/:id/publish/benchmark", isAuthenticated, async (req, res) => {
 });
 
 /** LAB-EX-05: logical deletion; an experiment with completed executions is archived instead. */
-router.delete("/:id", isAuthenticated, async (req, res) => {
+router.delete("/:id", hasLaboratoryAccess, async (req, res) => {
   try {
     const result = await experimentUseCase.deleteExperiment(req.params.id, req.user?.id!);
     res.status(200).json({
@@ -166,7 +166,7 @@ router.delete("/:id", isAuthenticated, async (req, res) => {
   }
 });
 
-router.get("/:id/history", isAuthenticated, async (req, res) => {
+router.get("/:id/history", hasLaboratoryAccess, async (req, res) => {
   try {
     res.status(200).json(await experimentUseCase.getExperimentHistory(req.params.id, req.user?.id!));
   } catch (error) {
@@ -174,7 +174,7 @@ router.get("/:id/history", isAuthenticated, async (req, res) => {
   }
 });
 
-router.get("/:id/version/:version", isAuthenticated, async (req, res) => {
+router.get("/:id/version/:version", hasLaboratoryAccess, async (req, res) => {
   try {
     const version = Number.parseInt(req.params.version, 10);
     res.status(200).json(
@@ -185,7 +185,7 @@ router.get("/:id/version/:version", isAuthenticated, async (req, res) => {
   }
 });
 
-router.post("/:id/version/:version/restore", isAuthenticated, async (req, res) => {
+router.post("/:id/version/:version/restore", hasLaboratoryAccess, async (req, res) => {
   try {
     const version = Number.parseInt(req.params.version, 10);
     res.status(200).json(
@@ -196,7 +196,7 @@ router.post("/:id/version/:version/restore", isAuthenticated, async (req, res) =
   }
 });
 
-router.get("/:id/collaborators", isAuthenticated, async (req, res) => {
+router.get("/:id/collaborators", hasLaboratoryAccess, async (req, res) => {
   try {
     res.status(200).json(await experimentUseCase.getCollaborators(req.params.id, req.user?.id!));
   } catch (error) {
@@ -204,7 +204,7 @@ router.get("/:id/collaborators", isAuthenticated, async (req, res) => {
   }
 });
 
-router.delete("/:id/collaborators/:collaboratorId", isAuthenticated, async (req, res) => {
+router.delete("/:id/collaborators/:collaboratorId", hasLaboratoryAccess, async (req, res) => {
   try {
     await experimentUseCase.removeCollaborator(req.params.id, req.params.collaboratorId, req.user?.id!);
     res.status(200).json({ message: "Collaborator removed successfully." });

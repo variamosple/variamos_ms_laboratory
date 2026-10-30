@@ -3,7 +3,7 @@ FROM node:24-alpine
 
 # Arguments
 
-#ARG PORT=4000
+#ARG PORT=8002
 #ARG DB_HOST
 #ARG DB_DATABASE=VariamosDB
 #ARG DB_PORT=5432
@@ -54,7 +54,7 @@ RUN npm run build
 #RUN chown -R root:root /home
 #RUN chown -R root:root /var
 
-EXPOSE 4000
+EXPOSE 8002
 
 # Apply the pending migrations, then start the service
 CMD [ "sh", "-c", "node ./dist/DataProviders/dataBase/migrate.js && node ./dist/Domain/Init/StartServiceUseCases.js" ]

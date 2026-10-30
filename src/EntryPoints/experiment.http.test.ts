@@ -1,7 +1,7 @@
 import request from "supertest";
 
 jest.mock("@variamosple/variamos-security", () => ({
-  isAuthenticated: (req: any, _res: any, next: any) => {
+  hasPermissions: () => (req: any, _res: any, next: any) => {
     req.user = { id: "user-1" };
     next();
   },

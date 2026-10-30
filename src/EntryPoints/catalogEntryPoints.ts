@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { isAuthenticated } from "@variamosple/variamos-security";
+import { hasLaboratoryAccess } from "./laboratoryAccess";
 import { getReasoningGateway } from "../Domain/Reasoning/ReasoningGateway";
 import { sendError } from "./sendError";
 
@@ -8,7 +8,7 @@ const router = Router();
 export const CATALOG_ROUTE = "/catalog";
 
 /** LAB-CF-02: solvers offered by the Reasoning module, with versions and parameters. */
-router.get("/solvers", isAuthenticated, async (_req, res) => {
+router.get("/solvers", hasLaboratoryAccess, async (_req, res) => {
   try {
     res.status(200).json(await getReasoningGateway().listSolvers());
   } catch (error) {

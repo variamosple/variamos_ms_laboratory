@@ -99,6 +99,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "The account lacks the laboratory::access permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -216,7 +226,7 @@
             }
           },
           "403": {
-            "description": "No access to the project (LAB-EX-01)",
+            "description": "No access to the project (LAB-EX-01), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -257,6 +267,16 @@
           },
           "401": {
             "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -371,6 +391,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "The account lacks the laboratory::access permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -471,6 +501,16 @@
           },
           "401": {
             "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -585,6 +625,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "The account lacks the laboratory::access permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -685,6 +735,16 @@
           },
           "401": {
             "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -801,7 +861,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -871,7 +931,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -964,7 +1024,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -1044,7 +1104,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -1114,7 +1174,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -1184,7 +1244,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -1264,7 +1324,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -1380,7 +1440,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -1466,7 +1526,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -1536,7 +1596,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -1599,7 +1659,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -1659,7 +1719,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -1727,7 +1787,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -1808,7 +1868,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -1868,7 +1928,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -1954,6 +2014,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "The account lacks the laboratory::access permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -1997,6 +2067,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "The account lacks the laboratory::access permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         },
         "tags": [
@@ -2023,6 +2103,16 @@
           },
           "401": {
             "description": "No valid VariaMos session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -2062,7 +2152,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -2139,6 +2229,16 @@
               }
             }
           },
+          "403": {
+            "description": "The account lacks the laboratory::access permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Unknown or deleted",
             "content": {
@@ -2198,7 +2298,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -2259,7 +2359,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -2330,6 +2430,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "The account lacks the laboratory::access permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         },
         "tags": [
@@ -2385,7 +2495,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -2456,7 +2566,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -2524,7 +2634,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -2592,7 +2702,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -2676,7 +2786,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -2809,7 +2919,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -2886,7 +2996,7 @@
             }
           },
           "403": {
-            "description": "No permission on this experiment (LAB-NF-05)",
+            "description": "No permission on this experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -2955,7 +3065,7 @@
             }
           },
           "403": {
-            "description": "No permission on an experiment (LAB-NF-05)",
+            "description": "No permission on an experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -3025,7 +3135,7 @@
             }
           },
           "403": {
-            "description": "No permission on an experiment (LAB-NF-05)",
+            "description": "No permission on an experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -3101,7 +3211,7 @@
             }
           },
           "403": {
-            "description": "No permission on an experiment (LAB-NF-05)",
+            "description": "No permission on an experiment (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -3197,7 +3307,7 @@
             }
           },
           "403": {
-            "description": "No access to the project",
+            "description": "No access to the project, or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -3250,7 +3360,7 @@
             }
           },
           "403": {
-            "description": "No permission (LAB-NF-05)",
+            "description": "No permission (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -3328,7 +3438,7 @@
             }
           },
           "403": {
-            "description": "No permission (LAB-NF-05)",
+            "description": "No permission (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -3416,7 +3526,7 @@
             }
           },
           "403": {
-            "description": "No permission (LAB-NF-05)",
+            "description": "No permission (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -3482,7 +3592,7 @@
             }
           },
           "403": {
-            "description": "No permission (LAB-NF-05)",
+            "description": "No permission (LAB-NF-05), or the account lacks the laboratory::access permission",
             "content": {
               "application/json": {
                 "schema": {
@@ -3510,7 +3620,7 @@
       "session": {
         "type": "http",
         "scheme": "bearer",
-        "description": "VariaMos session token, as a Bearer header or the authToken cookie."
+        "description": "VariaMos session token, as a Bearer header or the authToken cookie. The account must hold the laboratory::access permission."
       }
     },
     "schemas": {

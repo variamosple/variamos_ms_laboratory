@@ -1,5 +1,5 @@
 import express, { Router } from "express";
-import { isAuthenticated } from "@variamosple/variamos-security";
+import { hasLaboratoryAccess } from "./laboratoryAccess";
 import RunUseCase from "../Domain/Laboratory/RunUseCase";
 import { sendError } from "./sendError";
 
@@ -10,7 +10,7 @@ export const runsByReferenceRouter = Router();
 export const RUNS_BY_REFERENCE_ROUTE = "/runs";
 
 // ?runId=a&runId=b: ids or persistent ids, of one experiment or several
-runsByReferenceRouter.get("/compare", isAuthenticated, async (req, res) => {
+runsByReferenceRouter.get("/compare", hasLaboratoryAccess, async (req, res) => {
   try {
     const value = req.query.runId;
     const references = (Array.isArray(value) ? value : value === undefined ? [] : [value]).map(String);
@@ -20,7 +20,7 @@ runsByReferenceRouter.get("/compare", isAuthenticated, async (req, res) => {
   }
 });
 
-runsByReferenceRouter.get("/:persistentId", isAuthenticated, async (req, res) => {
+runsByReferenceRouter.get("/:persistentId", hasLaboratoryAccess, async (req, res) => {
   try {
     res.json(await runUseCase.resolve(req.params.persistentId, req.user?.id!));
   } catch (error) {
@@ -32,7 +32,7 @@ runsByReferenceRouter.get("/:persistentId", isAuthenticated, async (req, res) =>
 export const reproductionsRouter = Router();
 export const REPRODUCTIONS_ROUTE = "/reproductions";
 
-reproductionsRouter.post("/", isAuthenticated, express.raw({ type: ["application/zip", "application/octet-stream"], limit: "60mb" }), async (req, res) => {
+reproductionsRouter.post("/", hasLaboratoryAccess, express.raw({ type: ["application/zip", "application/octet-stream"], limit: "60mb" }), async (req, res) => {
   try {
     const file = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
     res.status(201).json(await runUseCase.reproduce(file, String(req.query.projectId ?? ""), req.user?.id!));

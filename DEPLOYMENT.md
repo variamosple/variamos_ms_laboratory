@@ -22,7 +22,7 @@ Nothing has been deployed yet: the first target is the team's test environment, 
 
 | Setting | Needed | Note |
 |---|---|---|
-| `PORT` | 4000 | |
+| `PORT` | 8002 | free on every platform host: 8000, 8001 and 8003 to 8007 are taken (DevOps compose files) |
 | `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USER`, `DB_PASSWORD` | yes | given at run time, never in the image (`.dockerignore`) |
 | `DB_SCHEMA` | `variamos_laboratory` | |
 | `DB_SSL` | `true` | `false` only for a local database without TLS; any other value stops the service |
@@ -50,13 +50,18 @@ Nothing has been deployed yet: the first target is the team's test environment, 
 - [ ] **Open**: CORS. The backend accepts credentials from any origin (`cors({ origin: true, credentials: true })`
       in `src/app.ts`); with a cookie session, the allowed origins should be the platform's. Depends on the
       `SameSite` attribute of the cookie, set by the Administration module.
-- [ ] **Open**: the entry to the Laboratory from VariaMos (menu or link).
+- [ ] The Laboratory tab of the platform menu, between Languages and Wiki, comes from `variamos_ms_admin`
+      (`GET /v1/configurations/menu`). It and every backend route except `/health` need the permission
+      `laboratory::access`; the admin migration 0012 creates it and grants it to the Administrator role only.
+      To open the Laboratory to more people, an administrator adds the permission to their role in the Roles
+      page. The permissions travel in the session token: a user sees the change at the next sign-in.
 
 ## 5. After each deployment
 
 - [ ] `GET /health` answers 200 with `{"status": "ok", "gateways": {"reasoning": "mock", "notifications": "mock"}}`;
       503 when the database is unreachable. The start-up log names the same gateways.
 - [ ] `npm run migrate` reports nothing left to apply.
-- [ ] In the interface, signed in: the experiment list of a project opens; an experiment can be created,
+- [ ] Signed in without `laboratory::access`: no Laboratory tab, and the backend answers 403.
+- [ ] In the interface, signed in with it: the experiment list of a project opens; an experiment can be created,
       marked Ready (each model shows its pinned copy and the semantics of its language), run and its results read.
 - [ ] Nothing more: no load or performance target is checked before the real Reasoning service (MVP plan, step 9).
