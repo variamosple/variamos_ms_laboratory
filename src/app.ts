@@ -15,8 +15,10 @@ import { Config } from "./Config";
 export const app = express();
 
 app.use(cookieParser(""));
+// Only the platform's pages may send the session cookie (LAB_CORS_ORIGINS); any other origin gets no
+// Access-Control-Allow-Origin, so its browser refuses the answer.
 // Content-Disposition carries the name of exported files (LAB-MT-05)
-app.use(cors({ origin: true, credentials: true, exposedHeaders: ["Content-Disposition", "X-Content-SHA256"] }));
+app.use(cors({ origin: Config.CORS_ORIGINS, credentials: true, exposedHeaders: ["Content-Disposition", "X-Content-SHA256"] }));
 app.use(express.json({ limit: "60mb" }));
 app.use(express.urlencoded({ extended: true, limit: "60mb" }));
 
