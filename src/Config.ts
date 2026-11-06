@@ -30,11 +30,44 @@ export function choice<T extends string>(name: string, fallback: T, allowed: rea
   return raw as T;
 }
 
+/**
+ * A list of web origins (scheme, host and port, comma separated); a value that is not an origin stops the
+ * service, so that a typo cannot open or close the access silently.
+ */
+export function origins(name: string, fallback: readonly string[]): string[] {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return [...fallback];
+  return raw.split(",").map((entry) => entry.trim()).filter((entry) => entry !== "").map((entry) => {
+    let origin = "";
+    try {
+      origin = new URL(entry).origin;
+    } catch {
+      // reported below
+    }
+    if (origin !== entry) {
+      throw new Error(`${name} must list origins such as https://app.variamos.com, not "${entry}".`);
+    }
+    return entry;
+  });
+}
+
+// The platform, and the development servers of the interface (npm start on 3000, npm run dev on 3003).
+// In production the interface is served by the same origin as this service, through the platform proxy.
+export const DEFAULT_CORS_ORIGINS = [
+  "https://app.variamos.com",
+  "http://localhost:3000",
+  "http://localhost:3003",
+  "http://127.0.0.1:3000",
+  "http://127.0.0.1:3003",
+] as const;
+
 export const Config = {
     NODE_ENV: process.env.NODE_ENV || 'development',
     HOST: process.env.HOST || '127.0.0.1',
     // Free on every platform host (DevOps compose and nginx files, 2026-10-30); 4000 is the Administration module's
     PORT: process.env.PORT || 8002,
+    // Origins whose pages may call this service with the session cookie
+    CORS_ORIGINS: origins("LAB_CORS_ORIGINS", DEFAULT_CORS_ORIGINS),
     // Recorded in the provenance of each run (LAB-RP-02)
     VERSION: JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8")).version as string,
     DB: {

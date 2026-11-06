@@ -1,77 +1,55 @@
-# Use postgres/example user/password credentials
-version: '3.1'
+# The Laboratory services, as they are added to the platform's compose file on the production server
+# (/home/ubuntu/docker-compose-aws-develop-nginx.yml, project "variamos_main", env file .env.aws.develop).
+# Copy the two blocks under "services:" of that file; the network is the one every service already uses.
+# The deployment workflows only pull the images and recreate these two services (see DEPLOYMENT.md).
+#
+# No port is published on the host: nginx reaches each service by its host name on the Docker network,
+# as for the other services (proxy_pass http://variamos_ms_laboratory:8002/...). The published ports of
+# the other services answer in clear HTTP from the Internet, which this file does not repeat.
 
-services: 
+services:
 
-  dbaws:
-    image: postgres:14.8
-    container_name: variamos_db_aws
-    hostname: variamos_db
-    restart: always
-    environment:
-      POSTGRES_PASSWORD: ${VARIAMOS_MS_LABORATORY_DB_PASSWORD}
-      POSTGRES_USER: ${VARIAMOS_MS_LABORATORY_DB_USER}
-      POSTGRES_SSL: ${VARIAMOS_MS_LABORATORY_DB_SSL}
-    ports:
-      - "5433:${VARIAMOS_MS_LABORATORY_DB_PORT}"
-    volumes:
-      - variamos_pgdata_aws:/var/lib/postgresql/variamosdata148
-    networks:
-      - variamosnet_aws
-
-  admineraws:
-    image: adminer
-    container_name: variamos_pgadmin_aws
-    hostname: variamos_pgadmin
-    restart: always
-    ports:
-      - 8080:8080
-    networks:
-      - variamosnet_aws
-
-  variamospleaws:
-    image: jasotov/variamosple:latest
-    container_name: variamosple_aws
-    hostname: variamosple
-    ports:
-      - 8000:3000
-    networks:
-      - variamosnet_aws
-
-  variamosmslaboratoryaws:
-    image: jasotov/variamos_ms_laboratory:latest
-    container_name: variamos_ms_laboratory_aws
+  variamos_ms_laboratory:
+    image: jasotov/variamos_ms_laboratory:main
+    container_name: variamos_ms_laboratory_aws_main
     hostname: variamos_ms_laboratory
-    ports:
-      - 8002:8002
+    restart: unless-stopped
     networks:
-      - variamosnet_aws
+      - variamosnet_aws_main
     environment:
-      - DB_HOST=${VARIAMOS_MS_LABORATORY_DB_HOST}
-      - DB_DATABASE=${VARIAMOS_MS_LABORATORY_DB_DATABASE} 
-      - DB_PORT=${VARIAMOS_MS_LABORATORY_DB_PORT}
-      - DB_SSL=${VARIAMOS_MS_LABORATORY_DB_SSL}
-      - DB_USER=${VARIAMOS_MS_LABORATORY_DB_USER}
-      - DB_PASSWORD=${VARIAMOS_MS_LABORATORY_DB_PASSWORD}
+      - PORT=8002
+      # The database account of the other services (admin, notifications, languages, vms_projects)
+      - DB_HOST=${VARIAMOS_MS_LANGUAGES_DB_HOST}
+      - DB_PORT=${VARIAMOS_MS_LANGUAGES_DB_PORT}
+      - DB_DATABASE=${VARIAMOS_MS_LANGUAGES_DB_DATABASE}
+      - DB_USER=${VARIAMOS_MS_LANGUAGES_DB_USER}
+      - DB_PASSWORD=${VARIAMOS_MS_LANGUAGES_DB_PASSWORD}
+      # The platform's PostgreSQL has ssl = off; the connection stays on the Docker network
+      - DB_SSL=false
+      - DB_SCHEMA=variamos_laboratory
+      # The service only checks the sessions signed by the Administration module: the public key is
+      # enough, mounted as for variamos_ms_languages and vms_projects
+      - VARIAMOS_PUBLIC_KEY_PATH=/mnt/app-config/jwtRS256.key.pub
+    volumes:
+      - /home/ubuntu/.ssh/jwtRS256.key.pub:/mnt/app-config/jwtRS256.key.pub:ro
+    # Read by the monitoring of the Administration module (Micro-services page)
+    labels:
+      variamos.service.monitored: "true"
+      variamos.service.name: "variamos_ms_laboratory"
+      variamos.service.display-name: "Laboratory"
+      variamos.service.internal-port: "8002"
+      variamos.service.health-path: "/health"
 
   variamoslaboratoryaws:
-    image: jasotov/variamoslaboratory_aws:latest
-    container_name: variamoslaboratory_aws
+    image: jasotov/variamoslaboratory:main
+    container_name: variamoslaboratory_aws_main
     hostname: variamoslaboratory
-    ports:
-      - 8009:3000
+    restart: unless-stopped
     networks:
-      - variamosnet_aws
-    environment:
-      - DB_HOST=${VARIAMOS_MS_LABORATORY_DB_HOST}
-      - DB_DATABASE=${VARIAMOS_MS_LABORATORY_DB_DATABASE} 
-      - DB_PORT=${VARIAMOS_MS_LABORATORY_DB_PORT}
-      - DB_SSL=${VARIAMOS_MS_LABORATORY_DB_SSL}
-      - DB_USER=${VARIAMOS_MS_LABORATORY_DB_USER}
-      - DB_PASSWORD=${VARIAMOS_MS_LABORATORY_DB_PASSWORD}
+      - variamosnet_aws_main
 
 networks:
-  variamosnet_aws:
-  
-volumes:
-  variamos_pgdata_aws:
+  # Created by the platform's compose file; declared here so that this file can be checked on its own
+  variamosnet_aws_main:
+    external: true
+    name: variamos_main_variamosnet_aws_main

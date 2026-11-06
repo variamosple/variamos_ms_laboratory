@@ -33,7 +33,8 @@ COPY tsconfig.json ./
 
 # COPY dist/ ./dist
 
-RUN npm install
+# The versions of the lock file, as in the CI
+RUN npm ci
 # RUN npm install -g typescript
 # RUN npm i --save-dev @types/node
 

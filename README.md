@@ -12,6 +12,11 @@ as a `Bearer` header or the `authToken` cookie. The service verifies it with the
 (`src/EntryPoints/laboratoryAccess.ts`), given at first to the Administrator role only: other accounts
 get 403 before any work, so that they cannot load the server with runs.
 
+Only the pages of the origins in `LAB_CORS_ORIGINS` (comma separated) may call the service with the session
+cookie. By default: `https://app.variamos.com` and the development servers of the interface
+(`http://localhost:3000`, `http://localhost:3003` and the same ports on `127.0.0.1`). A value that is not an
+origin (with a path, or without its scheme) stops the service.
+
 ## Database
 
 The Laboratory tables live in the schema named by `DB_SCHEMA` (default `variamos_laboratory`).
