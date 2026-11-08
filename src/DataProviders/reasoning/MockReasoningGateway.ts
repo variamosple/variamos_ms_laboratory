@@ -129,7 +129,7 @@ interface MockJob {
 }
 
 /**
- * Stands in for the Reasoning module until its public API exists (roadmap Q5).
+ * Stands in for the Reasoning module during development and tests (the default gateway).
  * It runs nothing: a job only waits `durationMs`, then returns a result
  * computed from what it received, marked as simulated. The result reflects the
  * models, parameters and operational context sent, so tests can check that a

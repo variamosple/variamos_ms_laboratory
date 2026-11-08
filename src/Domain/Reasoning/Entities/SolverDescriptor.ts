@@ -13,6 +13,9 @@ export interface SolverParameter {
   options?: { value: string; label: string; description?: string }[];
 }
 
+/** The version of a solver whose provider does not report it (LAB-R-03 cannot be met; the package says so). */
+export const UNPINNED_VERSION = "unpinned";
+
 export interface SolverDescriptor {
   id: string;
   name: string;

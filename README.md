@@ -40,11 +40,25 @@ created by hand during the first version (`test-support/internship_schema.sql` s
 ## Reasoning
 
 The Laboratory never runs a solver itself (LAB-R-02): everything goes through `ReasoningGateway`
-(`src/Domain/Reasoning`). Until the public Reasoning API exists, `MockReasoningGateway` serves the solver
-catalog (MiniZinc, SWI-Prolog, Z3, with versions and parameters) and runs jobs: its results are marked
-`simulated: true`, and so are the metrics, exports and packages built from them. No real solver and no
-external service is called during development. The end of a run is sent to `NotificationGateway`, also a
-mock until the VariaMos notification service is connected. `isolation.test.ts` fails if a solver
+(`src/Domain/Reasoning`). Two implementations exist:
+
+- `MockReasoningGateway`, the default, serves a solver catalog (MiniZinc, SWI-Prolog, Z3, with versions and
+  parameters) and runs nothing: its results are marked `simulated: true`, and so are the metrics, exports
+  and packages built from them. No real solver and no external service is called during development.
+- `SemanticTranslatorReasoningGateway` sends each job to the `/query` endpoint of the VariaMos semantic
+  translator (`variamosple/semantic_translator`), which translates the model and the semantics of its
+  language into CLIF and calls the solver, as the VariaMos editor does. One scenario run is a few requests:
+  `sat` (under the operational context, sent as the `Selected` property of the features), `nsolve` to count
+  products and configurations up to `maxSolutions` (beyond it only a lower bound is stored), and an
+  iteration that tries to deselect each feature to find the required ones. Its limits: one model per
+  scenario; no extra constraints; no optimization mode; solver versions are not reported, so they are
+  recorded as `unpinned` and the reproducibility package says so; and `/query` answers synchronously with
+  no job to cancel, so cancelling a run stops the Laboratory waiting while the translator may finish the
+  request it received (LAB-RUN-04). Its tests run against a local stand-in of `/query`
+  (`src/test-support/semanticTranslatorStub.ts`), never a real instance.
+
+The end of a run is sent to `NotificationGateway`, a mock until the VariaMos notification service is
+connected. `isolation.test.ts` fails if a solver
 library or `child_process` appears in the service. `LAB_REASONING_GATEWAY` and `LAB_NOTIFICATION_GATEWAY`
 name the implementation behind each gateway: the service logs them at start-up and `GET /health` returns
 them, so a deployment shows whether its results are simulated.
@@ -106,7 +120,8 @@ outcome.
 | `LAB_RUN_RETRY_DELAY_MS` | 1000 | wait before a retry |
 | `LAB_RUN_POLL_INTERVAL_MS` | 500 | how often a job is polled |
 | `LAB_RUN_MAX_RUNTIME_SECONDS` | 3600 | time limit of a scenario run |
-| `LAB_REASONING_GATEWAY` | mock | what answers behind `ReasoningGateway`; only `mock` exists (roadmap Q5) |
+| `LAB_REASONING_GATEWAY` | mock | what answers behind `ReasoningGateway`: `mock` or `semantic_translator` |
+| `LAB_SEMANTIC_TRANSLATOR_URL` | | the `/query` endpoint of the semantic translator, needed by `semantic_translator` |
 | `LAB_NOTIFICATION_GATEWAY` | mock | what answers behind `NotificationGateway`; only `mock` exists |
 
 Invalid values stop the service at start-up.

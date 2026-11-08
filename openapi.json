@@ -35,11 +35,12 @@
                         "reasoning",
                         "notifications"
                       ],
-                      "description": "The implementation behind each gateway (LAB_REASONING_GATEWAY, LAB_NOTIFICATION_GATEWAY). With mock, results are simulated.",
+                      "description": "The implementation behind each gateway (LAB_REASONING_GATEWAY, LAB_NOTIFICATION_GATEWAY). With mock, results are simulated; semantic_translator runs real solvers.",
                       "properties": {
                         "reasoning": {
                           "enum": [
-                            "mock"
+                            "mock",
+                            "semantic_translator"
                           ]
                         },
                         "notifications": {

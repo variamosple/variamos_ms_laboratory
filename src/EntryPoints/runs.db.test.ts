@@ -23,6 +23,9 @@ import { setReasoningGateway } from "../Domain/Reasoning/ReasoningGateway";
 import { setNotificationGateway } from "../Domain/Notifications/NotificationGateway";
 import { RunExecutor, RunExecutorOptions, setRunExecutor } from "../DataProviders/execution/RunExecutor";
 import RunRepository from "../DataProviders/repository/Laboratory/RunRepository";
+import SemanticTranslatorReasoningGateway from "../DataProviders/reasoning/SemanticTranslatorReasoningGateway";
+import { ok, projects, startStub } from "../test-support/semanticTranslatorStub";
+import { unzip } from "../Domain/Results/zip";
 
 const SCHEMA = Config.DB.SCHEMA;
 const ALICE = "user-alice";
@@ -322,6 +325,43 @@ describe("LAB-CF-01 to LAB-CF-04, LAB-RP-02: what a run executes", () => {
     expect(run.startedAt).not.toBeNull();
     expect(run.finishedAt).not.toBeNull();
     expect(new Date(run.finishedAt).getTime()).toBeGreaterThanOrEqual(new Date(run.startedAt).getTime());
+  });
+});
+
+describe("roadmap Q5: a run through the semantic translator (local stand-in of /query)", () => {
+  test("the run sends the pinned model and semantics, and stores real results and metrics", async () => {
+    const stub = await startStub((body) => (body.data.query.operation === "nsolve" ? ok(projects(8)) : ok(true)));
+    try {
+      setReasoningGateway(new SemanticTranslatorReasoningGateway({ url: stub.url }));
+      const z3Translator = { version: "unpinned", timeOut: 5, mode: "enumeration", maxSolutions: 100 };
+      const experiment = await readyExperiment({ scenarios: [{ name: "Z3", modelIds: [MODEL_ID], solverConfigs: { z3: z3Translator } }] });
+      const run = await runToEnd(experiment.id);
+
+      expect(run.status).toBe("completed");
+      expect(run.provenance.reasoning).toEqual({ gateway: "semantic_translator" });
+      const [scenarioRun] = run.scenarioRuns;
+      expect(scenarioRun).toMatchObject({ status: "completed", solverId: "z3", solverVersion: "unpinned", attempts: 1 });
+      expect(scenarioRun.jobId).toMatch(/^st-/);
+      expect(scenarioRun.result).toMatchObject({ simulated: false, satisfiable: true, products: 8, configurations: 8 });
+      // The pinned copy and the semantics of its language, frozen at Ready (LAB-CF-01, LAB-RP-01)
+      expect(stub.received.map((body) => body.data.query.operation)).toEqual(["sat", "nsolve"]);
+      const sent = stub.received[0].data;
+      expect(sent.modelSelectedId).toBe(MODEL_ID);
+      expect(sent.rules).toEqual({ elementTypes: ["Feature", "Bundle"], relationTypes: ["Mandatory", "Optional"] });
+      expect(sent.project.productLines[0].domainEngineering.models[0].elements.map((element: any) => element.name)).toEqual(["Car", "GPS", "Radio"]);
+      // Degree of variability: 8 products / 2^3 features, not simulated
+      expect(scenarioRun.metrics).toEqual([{ metricId, value: 1, reason: null, inputs: { products: 8, features: 3 }, simulated: false }]);
+
+      // LAB-RP-01: the package says the results are real, and that the solver version is not known
+      const file = await request(app).get(`/experiments/${experiment.id}/runs/${run.id}/package`).set("x-test-user", ALICE).buffer(true)
+        .parse((res, done) => { const chunks: Buffer[] = []; res.on("data", (c: Buffer) => chunks.push(c)); res.on("end", () => done(null, Buffer.concat(chunks))); });
+      expect(file.status).toBe(200);
+      const manifest = JSON.parse(unzip(file.body as Buffer).get("manifest.json")!);
+      expect(manifest.reasoning).toEqual({ gateway: "semantic_translator", simulated: false });
+      expect(manifest.limitations).toEqual(["Solver versions: the semantic translator does not report them; a run on another deployment may use other solver versions."]);
+    } finally {
+      await stub.close();
+    }
   });
 });
 
