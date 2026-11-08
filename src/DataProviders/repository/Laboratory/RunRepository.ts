@@ -22,7 +22,7 @@ import {
   RunView,
 } from "../../../Domain/Laboratory/Entities/Run";
 import { ConflictError, NotFoundError, ValidationError } from "../../../Domain/Core/Entities/Errors";
-import { canRun, featureNames, runRejection, validateForReady } from "../../../Domain/Laboratory/ExperimentLifecycle";
+import { canRun, contextElements, featureNames, runRejection, validateForReady } from "../../../Domain/Laboratory/ExperimentLifecycle";
 import { getReasoningGateway } from "../../../Domain/Reasoning/ReasoningGateway";
 import { gatewayProblems } from "../../../Domain/Reasoning/gatewayProblems";
 import { getNotificationGateway } from "../../../Domain/Notifications/NotificationGateway";
@@ -97,6 +97,7 @@ export default class RunRepository {
         {
           // The run uses the copies pinned at Ready, not the live models
           models: new Map(pinned.filter((model) => model.modelSnapshot).map((model) => [model.modelId, featureNames(model.modelSnapshot)])),
+          elements: new Map(pinned.filter((model) => model.modelSnapshot).map((model) => [model.modelId, contextElements(model.modelSnapshot)])),
           solvers: await gateway.listSolvers(),
         }
       );

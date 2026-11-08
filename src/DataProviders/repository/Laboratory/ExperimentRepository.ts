@@ -34,6 +34,7 @@ import {
   editRejection,
   validateForReady,
   featureNames,
+  contextElements,
   Permission,
   permissionsOf,
   sharedRole,
@@ -1176,6 +1177,7 @@ export default class ExperimentRepository {
         },
         {
           models: new Map(models.map((model) => [model.id, featuresOf(model)])),
+          elements: new Map(models.map((model) => [model.id, contextElements(model.model)])),
           solvers: await gateway.listSolvers(),
         }
       );

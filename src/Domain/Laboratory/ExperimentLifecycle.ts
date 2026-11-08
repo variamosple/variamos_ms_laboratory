@@ -97,6 +97,18 @@ export const featureNames = (model: unknown): Set<string> =>
     )
   );
 
+/** An element of a model as an operational context names it: by its id or by its name (LAB-CF-04). */
+export interface ContextElement {
+  id?: string;
+  name?: string;
+}
+
+export const contextElements = (model: unknown): ContextElement[] =>
+  (((model as any)?.elements ?? []) as { id?: unknown; name?: unknown }[]).map((element) => ({
+    id: typeof element.id === "string" ? element.id : undefined,
+    name: typeof element.name === "string" ? element.name : undefined,
+  }));
+
 /** LAB-EX-06: anything but a running, archived or deleted experiment can be archived. */
 export const canArchive = (status: ExperimentStatus) =>
   !["running", "archived", "deleted"].includes(status);
@@ -143,6 +155,11 @@ export interface ReadyCheckInput {
 export interface ReadyCheckCatalog {
   /** Model id -> names and ids of its elements (the features an operational context can name). */
   models: Map<string, Set<string>>;
+  /**
+   * Model id -> its elements, so that a feature named once by its id and once by its name is known to be
+   * the same feature. Without it, only identical references are compared.
+   */
+  elements?: Map<string, ContextElement[]>;
   solvers: SolverDescriptor[];
 }
 
@@ -176,9 +193,18 @@ export function validateForReady(input: ReadyCheckInput, catalog: ReadyCheckCata
     const active = context?.activeFeatures ?? [];
     const inactive = context?.inactiveFeatures ?? [];
 
-    const overlap = active.filter((feature) => inactive.includes(feature));
-    if (overlap.length)
-      problems.push(`${label}: features both active and inactive (${overlap.join(", ")}).`);
+    // The same feature can be named by its id in one list and by its name in the other
+    const elements = modelIds.flatMap((modelId) => catalog.elements?.get(modelId) ?? []);
+    const designates = (element: ContextElement, reference: string) => reference === element.id || reference === element.name;
+    const overlap = new Set<string>();
+    elements
+      .filter((element) => active.some((reference) => designates(element, reference)) && inactive.some((reference) => designates(element, reference)))
+      .forEach((element) => overlap.add(element.name ?? element.id ?? ""));
+    active
+      .filter((reference) => inactive.includes(reference) && !elements.some((element) => designates(element, reference)))
+      .forEach((reference) => overlap.add(reference));
+    if (overlap.size)
+      problems.push(`${label}: features both active and inactive (${[...overlap].join(", ")}).`);
 
     // The features of the context must belong to the scenario models (LAB-CF-04)
     const known = new Set(modelIds.flatMap((modelId) => [...(catalog.models.get(modelId) ?? [])]));

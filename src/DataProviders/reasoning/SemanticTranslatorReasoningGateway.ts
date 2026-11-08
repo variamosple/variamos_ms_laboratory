@@ -88,6 +88,11 @@ const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
  */
 export function applyContext(model: Model, active: string[], inactive: string[]): Model {
   const result = copy(model);
+  const matches = (element: Element, reference: string) => element.id === reference || element.name === reference;
+  const conflict = (result.elements ?? []).find((element) =>
+    active.some((reference) => matches(element, reference)) && inactive.some((reference) => matches(element, reference))
+  );
+  if (conflict) throw new UnsupportedJobError(`the feature "${conflict.name ?? conflict.id}" is both active and inactive.`);
   const force = (feature: string, value: "Selected" | "Unselected") => {
     const elements = (result.elements ?? []).filter((element) => element.id === feature || element.name === feature);
     if (elements.length === 0) throw new UnsupportedJobError(`the feature "${feature}" of the operational context is not in the model.`);

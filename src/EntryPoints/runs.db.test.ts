@@ -139,6 +139,84 @@ afterAll(async () => {
   await sequelize.close();
 });
 
+describe("LAB-CF-04: contradictory feature aliases", () => {
+  const aliasModelId = "model-alias";
+  const z3Unpinned = { version: "unpinned", timeOut: 5, mode: "satisfiability", maxSolutions: 1000 };
+
+  async function createAliasExperiment(active: string, inactive: string) {
+    await sequelize.query(
+      `INSERT INTO variamos.model (id, project_id, product_line_id, engineering_type, name, language_id, model)
+       VALUES ('${aliasModelId}', '${PROJECT}', 'pl-1', 'domain', 'Alias model', 1,
+               '{"elements": [{"id": "gps", "name": "GPS", "properties": [{"name": "Selected", "value": "Undefined"}]}], "relationships": []}')
+       ON CONFLICT (id) DO NOTHING`
+    );
+    const created = await as(ALICE).post("/experiments", {
+      name: "Contradictory feature aliases", projectId: PROJECT, metrics: [metricId],
+      scenarios: [{ name: "Z3", modelIds: [aliasModelId], solverConfigs: { z3: z3Unpinned },
+        operationalContext: { activeFeatures: [active], inactiveFeatures: [inactive], extraConstraints: "" } }],
+    });
+    expect(created.status).toBe(201);
+    return created.body.id as string;
+  }
+
+  test.each([["gps", "GPS"], ["GPS", "gps"]])(
+    "Ready refuses active %s and inactive %s before a request is sent",
+    async (active, inactive) => {
+      const stub = await startStub(() => ok(true));
+      try {
+        setReasoningGateway(new SemanticTranslatorReasoningGateway({ url: stub.url }));
+        const id = await createAliasExperiment(active, inactive);
+        const ready = await as(ALICE).put(`/experiments/${id}/ready`);
+        expect(ready.status).toBe(400);
+        expect(await statusOf(id)).toBe("draft");
+        expect(stub.received).toHaveLength(0);
+      } finally { await stub.close(); }
+    }
+  );
+
+  test("Ready refuses them with a gateway that has no check of its own, as the mock in production", async () => {
+    const mock = new MockReasoningGateway({ durationMs: 50 });
+    mock.listSolvers = () => new SemanticTranslatorReasoningGateway({ url: "http://127.0.0.1:9/query" }).listSolvers();
+    setReasoningGateway(mock);
+    const id = await createAliasExperiment("gps", "GPS");
+    const ready = await as(ALICE).put(`/experiments/${id}/ready`);
+
+    expect(ready.status).toBe(400);
+    expect(ready.body.details).toEqual(["Z3: features both active and inactive (GPS)."]);
+    expect(await statusOf(id)).toBe("draft");
+  });
+
+  test("start refuses contradictory aliases stored before this check", async () => {
+    // Ready with a valid context, then the contradiction written as an experiment made Ready before
+    // the check would hold it
+    const previous = new MockReasoningGateway({ durationMs: 50 });
+    previous.listSolvers = () => new SemanticTranslatorReasoningGateway({ url: "http://127.0.0.1:9/query" }).listSolvers();
+    setReasoningGateway(previous);
+    const id = await createAliasExperiment("gps", "gps");
+    await sequelize.query(
+      `UPDATE ${SCHEMA}.scenario SET operational_context = '{"activeFeatures": [], "inactiveFeatures": [], "extraConstraints": ""}' WHERE experiment_id = '${id}'`
+    );
+    expect((await as(ALICE).put(`/experiments/${id}/ready`)).status).toBe(200);
+    await sequelize.query(
+      `UPDATE ${SCHEMA}.scenario SET operational_context = '{"activeFeatures": ["gps"], "inactiveFeatures": ["GPS"], "extraConstraints": ""}' WHERE experiment_id = '${id}'`
+    );
+
+    const stub = await startStub(() => ok(true));
+    try {
+      setReasoningGateway(new SemanticTranslatorReasoningGateway({ url: stub.url }));
+      const started = await as(ALICE).post(`/experiments/${id}/runs`);
+      expect(started.status).toBe(400);
+      expect(started.body.details).toEqual(["Z3: features both active and inactive (GPS)."]);
+      expect((await as(ALICE).get(`/experiments/${id}/runs`)).body).toEqual([]);
+      expect(await statusOf(id)).toBe("ready");
+      expect(stub.received).toHaveLength(0);
+    } finally {
+      await executor.whenIdle();
+      await stub.close();
+    }
+  });
+});
+
 describe("LAB-RUN-01, LAB-RUN-03, LAB-EX-07: a run from start to end", () => {
   test("a Ready experiment runs in the background and completes", async () => {
     const experiment = await readyExperiment();
