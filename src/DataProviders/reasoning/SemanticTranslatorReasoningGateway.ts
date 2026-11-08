@@ -83,16 +83,17 @@ const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
  * The model with the operational context applied the way the VariaMos editor
  * does it: the "Selected" property of a feature set to Selected or Unselected,
  * which the semantic translator turns into the selected or deselected
- * constraint of the language (LAB-CF-04). Features are named, as in the context.
+ * constraint of the language (LAB-CF-04). A feature of the context is named by
+ * its id or its name, as Ready accepts it (featureNames in ExperimentLifecycle).
  */
 export function applyContext(model: Model, active: string[], inactive: string[]): Model {
   const result = copy(model);
-  const force = (name: string, value: "Selected" | "Unselected") => {
-    const elements = (result.elements ?? []).filter((element) => element.name === name);
-    if (elements.length === 0) throw new UnsupportedJobError(`the feature "${name}" of the operational context is not in the model.`);
+  const force = (feature: string, value: "Selected" | "Unselected") => {
+    const elements = (result.elements ?? []).filter((element) => element.id === feature || element.name === feature);
+    if (elements.length === 0) throw new UnsupportedJobError(`the feature "${feature}" of the operational context is not in the model.`);
     elements.forEach((element) => {
       const selected = (element.properties ?? []).find((property) => property.name === "Selected");
-      if (!selected) throw new UnsupportedJobError(`the feature "${name}" has no "Selected" property, so the operational context cannot force it.`);
+      if (!selected) throw new UnsupportedJobError(`the feature "${feature}" has no "Selected" property, so the operational context cannot force it.`);
       selected.value = value;
     });
   };

@@ -108,6 +108,16 @@ describe("requests sent to /query (contract with semantic_translator)", () => {
     expect(done.result).toMatchObject({ satisfiable: true, products: 4, configurations: 1, coreFeatures: 1 });
   });
 
+  test("a context feature named by its id is forced as one named by its name, as Ready accepts both", () => {
+    const selection = (activeFeatures: string[], inactiveFeatures: string[]) => {
+      const plan = planOf(requestOf({ operationalContext: { activeFeatures, inactiveFeatures, extraConstraints: "" } }));
+      return Object.fromEntries((plan.contextModel!.elements ?? []).map((element) => [element.name, element.properties![0].value]));
+    };
+
+    expect(selection(["e-gps"], ["e-radio"])).toEqual({ Car: "Undefined", GPS: "Selected", Radio: "Unselected" });
+    expect(selection(["e-gps"], ["e-radio"])).toEqual(selection(["GPS"], ["Radio"]));
+  });
+
   test("the answer gives the family metrics of the run (LAB-MT-03), not marked simulated", async () => {
     stub = await startStub((body) =>
       body.data.query.iterate_over ? ok(iteration(body)) : body.data.query.operation === "nsolve" ? ok(projects(4)) : ok(true)
