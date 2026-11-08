@@ -441,6 +441,56 @@ describe("models of a project the user cannot open (LAB-NF-05)", () => {
     const added = await as(BOB).put(`/experiments/${id}`, { scenarios: scenarioWith([ALICE_MODEL_ID, MODEL_ID]) });
     expect(added.status).toBe(200);
   });
+
+  test("a copy leaves them out, so that a shared experiment or a template read once gives no lasting view", async () => {
+    const { id } = await createExperiment(ALICE, { scenarios: scenarioWith([MODEL_ID, ALICE_MODEL_ID]) });
+    await as(ALICE).post(`/experiments/${id}/share`, { userEmail: "bob@example.org", role: "viewer" });
+
+    const copy = await as(BOB).post(`/experiments/${id}/copy`, { projectId: PROJECT_BOB });
+    expect(copy.status).toBe(201);
+    // Bob keeps the model of the project he is a member of
+    expect(copy.body.scenarios[0].models.map((m: any) => m.modelId)).toEqual([MODEL_ID]);
+    expect(JSON.stringify(copy.body)).not.toContain("Secret");
+    const copied = (await as(BOB).get(`/experiments/${copy.body.id}/history`)).body.find((e: any) => e.eventType === "experiment_copied");
+    expect(copied.newValue.modelsLeftOut).toEqual([ALICE_MODEL_ID]);
+    expect((await as(BOB).get(`/experiments/${copy.body.id}/version/1`)).body.scenarios[0].models.map((m: any) => m.modelId)).toEqual([MODEL_ID]);
+
+    // The same for a template; the owner's own copy keeps every model
+    await as(ALICE).post(`/experiments/${id}/publish/template`);
+    const fromTemplate = await as(BOB).post(`/experiments/${id}/copy`, { projectId: PROJECT_BOB });
+    expect(fromTemplate.body.scenarios[0].models.map((m: any) => m.modelId)).toEqual([MODEL_ID]);
+    const ownCopy = await as(ALICE).post(`/experiments/${id}/copy`);
+    expect(ownCopy.body.scenarios[0].models.map((m: any) => m.modelId)).toEqual([MODEL_ID, ALICE_MODEL_ID]);
+  });
+
+  test("a deleted project is closed to its members", async () => {
+    await sequelize.query(`INSERT INTO variamos.project (id, owner_id, name, is_deleted) VALUES ('project-deleted', '${ALICE}', 'Deleted', TRUE)`);
+    await sequelize.query(`INSERT INTO variamos.user_project (user_id, project_id, role) VALUES ('${BOB}', 'project-deleted', 'editor')`);
+    await sequelize.query(
+      `INSERT INTO variamos.model (id, project_id, product_line_id, engineering_type, name, language_id, model)
+       VALUES ('model-of-deleted-project', 'project-deleted', 'pl-1', 'domain', 'Gone', 1, '{"elements": [], "relationships": []}')`
+    );
+
+    const created = await as(BOB).post("/experiments", { name: "Probe", projectId: PROJECT_BOB, scenarios: scenarioWith(["model-of-deleted-project"]) });
+    expect(created.status).toBe(403);
+    expect(created.body.message).toBe(refusal("model-of-deleted-project"));
+  });
+
+  test.each([
+    ["a list of models that is not a list", [{ name: "S", modelIds: ALICE_MODEL_ID, solverConfigs }], "The models of a scenario must be a list."],
+    ["models that are not a list", [{ name: "S", models: { modelId: ALICE_MODEL_ID }, solverConfigs }], "The models of a scenario must be a list."],
+    ["scenarios that are not a list", "S", "The scenarios must be a list of scenarios."],
+    ["a scenario that is not an object", [null], "The scenarios must be a list of scenarios."],
+  ])("%s is refused with 400", async (_, scenarios, message) => {
+    const created = await as(BOB).post("/experiments", { name: "Probe", projectId: PROJECT_BOB, scenarios });
+    expect(created.status).toBe(400);
+    expect(created.body.message).toBe(message);
+
+    const { id } = await createExperiment(BOB);
+    const updated = await as(BOB).put(`/experiments/${id}`, { scenarios });
+    expect(updated.status).toBe(400);
+    expect(updated.body.message).toBe(message);
+  });
 });
 
 describe("archive, restore and deletion (LAB-EX-05, LAB-EX-06)", () => {

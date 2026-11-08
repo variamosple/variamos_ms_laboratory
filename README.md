@@ -96,6 +96,13 @@ executes only when given that permission (`POST /experiments/:id/share` with `pe
 users cannot be given access. A save names `expectedVersion`; when someone saved since, the answer is 409 with
 the changes made in between (LAB-COL-02).
 
+Models (LAB-NF-05): an experiment shows the content of its models to everyone who can read it, so a scenario
+takes only models of a project the user can open (owned, shared with them and not deleted, or a template
+project of the platform); creating or saving with another model, or an unknown one, is a 403. A save checks
+only the models it adds, so collaborators keep the models already there. A copy (`POST /experiments/:id/copy`)
+leaves out the models the user cannot open, as it leaves out another user's private metrics; the
+`experiment_copied` event lists them (`modelsLeftOut`).
+
 Ready checks: a name, at least one metric and one scenario; each scenario has one or more existing models
 whose language exists, at least one solver from the catalog pinned to an available version with valid
 parameters, and an operational context naming only features of its models. Ready then pins a copy of each

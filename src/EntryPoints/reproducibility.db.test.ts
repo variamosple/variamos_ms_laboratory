@@ -472,7 +472,8 @@ describe("LAB-NF-05: a package that names models the user cannot open", () => {
     }
     const copy = await as(BOB).post(`/experiments/${id}/copy`, { projectId: BOB_PROJECT });
     expect(copy.status).toBe(201);
-    expect(copy.body.scenarios[0].models.map((m: any) => m.modelId)).toEqual([newId]);
+    // A copy is a Draft that follows platform models: the detached snapshot is left out
+    expect(copy.body.scenarios[0].models).toEqual([]);
     expect(JSON.stringify(copy.body)).not.toContain(SECRET);
     const restored = await as(BOB).post(`/experiments/${id}/version/1/restore`);
     expect(restored.status).toBe(200);

@@ -361,19 +361,18 @@ export default class ExperimentRepository {
 
     const models = await OrmModel.findAll({ where: { id: ids }, attributes: ["id", "projectId"], transaction });
     const projectIds = [...new Set(models.map((model) => model.projectId).filter((id): id is string => !!id))];
-    const [owned, memberships] = await Promise.all([
-      OrmProject.findAll({
-        where: {
-          id: projectIds,
-          isDeleted: { [Op.not]: true },
-          [Op.or]: [{ ownerId: userId }, { template: true }],
-        },
-        attributes: ["id"],
-        transaction,
-      }),
-      OrmUserProject.findAll({ where: { projectId: projectIds, userId }, attributes: ["projectId"], transaction }),
-    ]);
-    const open = new Set([...owned.map((project) => project.id), ...memberships.map((membership) => membership.projectId)]);
+    const memberships = await OrmUserProject.findAll({ where: { projectId: projectIds, userId }, attributes: ["projectId"], transaction });
+    // A deleted project is closed to its members too, as in ensureProjectAccess
+    const projects = await OrmProject.findAll({
+      where: {
+        id: projectIds,
+        isDeleted: { [Op.not]: true },
+        [Op.or]: [{ ownerId: userId }, { template: true }, { id: memberships.map((membership) => membership.projectId) }],
+      },
+      attributes: ["id"],
+      transaction,
+    });
+    const open = new Set(projects.map((project) => project.id));
     return new Set(models.filter((model) => model.projectId && open.has(model.projectId)).map((model) => model.id));
   }
 
@@ -452,6 +451,9 @@ export default class ExperimentRepository {
     scenarios: ExperimentInput["scenarios"],
     existingIds: string[] = []
   ): (ScenarioInput & { id: string })[] {
+    if (scenarios != null && (!Array.isArray(scenarios) || scenarios.some((scenario) => !scenario || typeof scenario !== "object"))) {
+      throw new ValidationError("The scenarios must be a list of scenarios.");
+    }
     return (scenarios ?? []).map((scenario, index) => ({
       id: scenario.id && existingIds.includes(scenario.id) ? scenario.id : randomUUID(),
       name: scenario.name?.trim() || `Scenario ${index + 1}`,
@@ -464,9 +466,12 @@ export default class ExperimentRepository {
 
   /** The scenario models, in order and without duplicates. */
   private modelIdsOf(scenario: NonNullable<ExperimentInput["scenarios"]>[number]): string[] {
+    if ((scenario.modelIds != null && !Array.isArray(scenario.modelIds)) || (scenario.models != null && !Array.isArray(scenario.models))) {
+      throw new ValidationError("The models of a scenario must be a list.");
+    }
     const ids =
       scenario.modelIds ??
-      scenario.models?.map((model) => model.modelId) ??
+      scenario.models?.map((model) => model?.modelId) ??
       (scenario.modelId ? [scenario.modelId] : []);
     return [...new Set(ids.filter((id): id is string => typeof id === "string" && id !== ""))];
   }
@@ -1428,7 +1433,17 @@ export default class ExperimentRepository {
         userId,
         randomUUID
       );
-      const { scenarios, metricIds } = clone;
+      const { metricIds } = clone;
+      // LAB-NF-05: the copy belongs to the user and follows its models as they change. As another user's
+      // private metrics are, the models the user cannot open are left out: reading a shared experiment or a
+      // template once must not give a lasting view of them.
+      const sourceModelIds = [...new Set(clone.scenarios.flatMap((scenario) => scenario.modelIds ?? []))];
+      const usable = await this.usableModelIds(sourceModelIds, userId, transaction);
+      const modelsLeftOut = sourceModelIds.filter((modelId) => !usable.has(modelId));
+      const scenarios = clone.scenarios.map((scenario) => ({
+        ...scenario,
+        modelIds: (scenario.modelIds ?? []).filter((modelId) => usable.has(modelId)),
+      }));
 
       const newExperiment = await OrmExperiment.create(
         {
@@ -1481,7 +1496,7 @@ export default class ExperimentRepository {
             sourceExperimentId: source.id,
             sourceVersion: source.version,
           },
-          newValue: { ...snapshot, status: "draft" },
+          newValue: { ...snapshot, status: "draft", ...(modelsLeftOut.length ? { modelsLeftOut } : {}) },
         },
         { transaction }
       );
