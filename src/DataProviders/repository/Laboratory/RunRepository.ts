@@ -24,6 +24,7 @@ import {
 import { ConflictError, NotFoundError, ValidationError } from "../../../Domain/Core/Entities/Errors";
 import { canRun, featureNames, runRejection, validateForReady } from "../../../Domain/Laboratory/ExperimentLifecycle";
 import { getReasoningGateway } from "../../../Domain/Reasoning/ReasoningGateway";
+import { gatewayProblems } from "../../../Domain/Reasoning/gatewayProblems";
 import { getNotificationGateway } from "../../../Domain/Notifications/NotificationGateway";
 import ExperimentRepository from "./ExperimentRepository";
 import { OrmUser } from "../../../Domain/Session/Entities/User";
@@ -102,6 +103,22 @@ export default class RunRepository {
       pinned
         .filter((model) => !model.modelSnapshot || !model.modelSnapshotHash || !model.semanticsHash)
         .forEach((model) => problems.push(`The model ${model.modelId} is not pinned: mark the experiment Ready again.`));
+
+      // LAB-RUN-01: the gateway may have changed since Ready, and a reproduction is created Ready
+      if (problems.length === 0) {
+        problems.push(...gatewayProblems(gateway, scenarios.map((scenario, index) => ({
+          label: scenario.name?.trim() || `Scenario ${index + 1}`,
+          solverConfigs: scenario.solverConfigs,
+          operationalContext: scenario.operationalContext,
+          models: (((scenario as any).models ?? []) as OrmScenarioModel[]).map((model) => ({
+            modelId: model.modelId,
+            languageId: model.modelLanguageId ?? null,
+            hash: model.modelSnapshotHash!,
+            snapshot: model.modelSnapshot,
+            semantics: model.semanticsSnapshot,
+          })),
+        }))));
+      }
 
       if (problems.length > 0) {
         throw new ValidationError("The experiment cannot run.", [...new Set(problems)]);

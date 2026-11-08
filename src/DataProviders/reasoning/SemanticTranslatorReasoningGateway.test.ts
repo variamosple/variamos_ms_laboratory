@@ -305,6 +305,12 @@ describe("jobs the semantic translator cannot take are refused before anything i
     refused(requestOf({ models: [{ ...model, snapshot: bare }], operationalContext: { activeFeatures: ["Car"], inactiveFeatures: [], extraConstraints: "" } }), /no "Selected" property/);
   });
 
+  test("unsupported gives the same reason without sending anything, for the checks at Ready and before a run", () => {
+    const gateway = new SemanticTranslatorReasoningGateway({ url: "http://127.0.0.1:9/query" });
+    expect(gateway.unsupported(requestOf())).toBeNull();
+    expect(gateway.unsupported(requestOf({}, { mode: "optimization" }))).toBe('semantic_translator: the mode "optimization" is not offered.');
+  });
+
   test("submit refuses it as a permanent error, so the run fails without retry", async () => {
     const gateway = new SemanticTranslatorReasoningGateway({ url: "http://127.0.0.1:9/query" });
     await expect(gateway.submit(requestOf({}, { mode: "optimization" }))).rejects.toBeInstanceOf(UnsupportedJobError);

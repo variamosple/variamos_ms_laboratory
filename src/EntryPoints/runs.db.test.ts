@@ -363,6 +363,65 @@ describe("roadmap Q5: a run through the semantic translator (local stand-in of /
       await stub.close();
     }
   });
+
+  // LAB-RUN-01: a configuration the translator cannot take is refused before anything is sent
+  const z3Unpinned = { version: "unpinned", timeOut: 5, mode: "satisfiability", maxSolutions: 1000 };
+
+  test("Ready refuses a configuration the translator cannot take, with the reason", async () => {
+    const stub = await startStub(() => ok(true));
+    try {
+      setReasoningGateway(new SemanticTranslatorReasoningGateway({ url: stub.url }));
+      const created = await as(ALICE).post("/experiments", {
+        name: "Car with constraints",
+        projectId: PROJECT,
+        metrics: [metricId],
+        scenarios: [{
+          name: "Z3",
+          modelIds: [MODEL_ID],
+          solverConfigs: { z3: z3Unpinned },
+          operationalContext: { activeFeatures: [], inactiveFeatures: [], extraConstraints: "GPS => Radio" },
+        }],
+      });
+      expect(created.status).toBe(201);
+
+      const refused = await as(ALICE).put(`/experiments/${created.body.id}/ready`);
+      expect(refused.status).toBe(400);
+      expect(refused.body.message).toBe("The experiment is not ready to run.");
+      expect(refused.body.details).toEqual(["Z3 (z3): semantic_translator: extra constraints of the operational context cannot be sent."]);
+      expect(await statusOf(created.body.id)).toBe("draft");
+      expect(stub.received).toHaveLength(0);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  test("a run is refused before it is created when the gateway changed since Ready and cannot take it", async () => {
+    // Ready on a gateway with the translator's catalog but no check of its own, with a context the
+    // translator cannot force: the elements of the model have no "Selected" property
+    const before = new MockReasoningGateway({ durationMs: 50 });
+    before.listSolvers = () => new SemanticTranslatorReasoningGateway({ url: "http://127.0.0.1:9/query" }).listSolvers();
+    setReasoningGateway(before);
+    const experiment = await readyExperiment({
+      scenarios: [{ name: "Z3", modelIds: [MODEL_ID], solverConfigs: { z3: z3Unpinned }, operationalContext: { activeFeatures: ["GPS"], inactiveFeatures: [], extraConstraints: "" } }],
+    });
+
+    const stub = await startStub(() => ok(true));
+    try {
+      setReasoningGateway(new SemanticTranslatorReasoningGateway({ url: stub.url }));
+      const refused = await as(ALICE).post(`/experiments/${experiment.id}/runs`);
+
+      expect(refused.status).toBe(400);
+      expect(refused.body.message).toBe("The experiment cannot run.");
+      expect(refused.body.details).toEqual([
+        'Z3 (z3): semantic_translator: the feature "GPS" has no "Selected" property, so the operational context cannot force it.',
+      ]);
+      expect((await as(ALICE).get(`/experiments/${experiment.id}/runs`)).body).toEqual([]);
+      expect(await statusOf(experiment.id)).toBe("ready");
+      expect(stub.received).toHaveLength(0);
+    } finally {
+      await stub.close();
+    }
+  });
 });
 
 describe("LAB-RUN-04 cancellation", () => {

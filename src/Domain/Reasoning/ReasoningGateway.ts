@@ -20,6 +20,11 @@ export interface ReasoningGateway {
   status(jobId: string): Promise<ReasoningJobStatus>;
   /** Stops a job and releases its solver resources (LAB-RUN-04). */
   cancel(jobId: string): Promise<void>;
+  /**
+   * Why this implementation cannot take the job, or null; without it, every job the catalog allows is
+   * taken. Checked at Ready and before a run (gatewayProblems), so that nothing is sent for it.
+   */
+  unsupported?(request: ReasoningJobRequest): string | null;
 }
 
 /** The gateway named by LAB_REASONING_GATEWAY. */

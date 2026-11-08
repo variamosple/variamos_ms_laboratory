@@ -244,6 +244,16 @@ export default class SemanticTranslatorReasoningGateway implements ReasoningGate
     return copy(SOLVERS);
   }
 
+  unsupported(request: ReasoningJobRequest): string | null {
+    try {
+      planOf(request);
+      return null;
+    } catch (error) {
+      if (error instanceof UnsupportedJobError) return error.message;
+      throw error;
+    }
+  }
+
   async submit(request: ReasoningJobRequest): Promise<{ jobId: string }> {
     const plan = planOf(request);
     const jobId = `st-${randomUUID()}`;

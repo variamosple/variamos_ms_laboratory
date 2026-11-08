@@ -51,10 +51,12 @@ The Laboratory never runs a solver itself (LAB-R-02): everything goes through `R
   `sat` (under the operational context, sent as the `Selected` property of the features), `nsolve` to count
   products and configurations up to `maxSolutions` (beyond it only a lower bound is stored), and an
   iteration that tries to deselect each feature to find the required ones. Its limits: one model per
-  scenario; no extra constraints; no optimization mode; solver versions are not reported, so they are
-  recorded as `unpinned` and the reproducibility package says so; and `/query` answers synchronously with
-  no job to cancel, so cancelling a run stops the Laboratory waiting while the translator may finish the
-  request it received (LAB-RUN-04). For the same reason a request is sent again (LAB-RUN-06) only when the
+  scenario; no extra constraints; no optimization mode; an operational context only on features with a
+  `Selected` property. Ready and the start of each run check them (`gatewayProblems`), so such a
+  configuration is refused with the reason before anything is sent. Solver versions are not reported, so
+  they are recorded as `unpinned` and the reproducibility package says so. `/query` answers synchronously
+  with no job to cancel, so cancelling a run stops the Laboratory waiting while the translator may finish
+  the request it received (LAB-RUN-04). For the same reason a request is sent again (LAB-RUN-06) only when the
   translator did not receive it or refused it (connection refused, HTTP 429 or 503); after a proxy error
   (HTTP 502, 504), a lost connection or no answer within `timeOut`, the scenario run fails, since the
   translator may still be running the request. Its tests run against a local stand-in of `/query`
