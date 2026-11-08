@@ -136,6 +136,7 @@ beforeAll(async () => {
     "009_reproducibility.sql",
     "010_collaboration.sql",
     "011_language_semantics.sql",
+    "012_predefined_templates.sql",
   ]);
 });
 
@@ -596,6 +597,166 @@ describe("sharing, templates and cloning (LAB-COL-01, LAB-CF-05, LAB-EX-02)", ()
     const ownCopy = await as(ALICE).post(`/experiments/${id}/copy`);
     expect(ownCopy.body.projectId).toBe(PROJECT_ALICE);
     expect(clone.body.scenarios[0].solverConfigs).toEqual(solverConfigs);
+  });
+});
+
+describe("predefined templates and creation from a template (LAB-CF-05)", () => {
+  // Nora is a member of nothing and shares no experiment: the catalog must not depend on either
+  const NORA = "user-nora";
+  const PROJECT_NORA = "project-nora";
+  const PREDEFINED = [1, 2, 3, 4, 5].map((n) => `7e3a1000-0000-4000-8000-00000000000${n}`);
+  const invalidTemplate = "This template does not exist or is no longer published.";
+
+  beforeAll(async () => {
+    await sequelize.query(`INSERT INTO variamos."user" (id, "user", name, email) VALUES ('${NORA}', 'nora', 'Nora', 'nora@example.org')`);
+    await sequelize.query(`INSERT INTO variamos.project (id, owner_id, name) VALUES ('${PROJECT_NORA}', '${NORA}', 'Nora project')`);
+    await sequelize.query(
+      `INSERT INTO variamos.model (id, project_id, product_line_id, engineering_type, name, language_id, model)
+       VALUES ('model-nora', '${PROJECT_NORA}', 'pl-n', 'domain', 'Nora model', 1, '{"elements": [{"id": "n", "name": "Phone"}], "relationships": []}')`
+    );
+  });
+
+  /** The configuration a form holds once the template is applied: the template's, with new scenario ids and no foreign models. */
+  const applied = (template: any, overrides: object = {}) => ({
+    name: `${template.name} for my study`,
+    projectId: PROJECT_NORA,
+    templateId: template.id,
+    templateVersion: template.version,
+    description: template.description,
+    hypothesis: template.hypothesis,
+    labels: template.labels,
+    metrics: template.metrics.map((m: any) => m.id),
+    scenarios: template.scenarios.map((s: any) => ({ name: s.name, modelIds: [], solverConfigs: s.solverConfigs, operationalContext: s.operationalContext })),
+    ...overrides,
+  });
+  const count = async () => Number(((await sequelize.query(`SELECT count(*) AS n FROM ${SCHEMA}.experiment`)) as any)[0][0].n);
+
+  test("five predefined templates, readable by a user who is a member of nothing", async () => {
+    const listed = await as(NORA).get("/experiments/templates?pageNumber=1&pageSize=100");
+    expect(listed.status).toBe(200);
+    const predefined = listed.body.data.filter((e: any) => PREDEFINED.includes(e.id));
+    expect(predefined.map((e: any) => e.name).sort()).toEqual([
+      "Configurability analysis", "Operational context comparison", "Reproducibility check", "Solver benchmarking", "Variability metrics of a model",
+    ]);
+    expect(predefined.every((e: any) => e.isTemplate && e.labels.includes("predefined"))).toBe(true);
+
+    const solverIds = (await as(NORA).get("/catalog/solvers")).body.map((s: any) => s.id);
+    for (const id of PREDEFINED) {
+      const template = await as(NORA).get(`/experiments/${id}/detailed`);
+      expect(template.status).toBe(200);
+      expect(template.body).toMatchObject({ isTemplate: true, projectId: null, version: 1, status: "draft" });
+      expect(template.body.description).toBeTruthy();
+      expect(template.body.metrics.length).toBeGreaterThan(0);
+      expect(template.body.scenarios.length).toBeGreaterThan(0);
+      for (const scenario of template.body.scenarios) {
+        expect(scenario.models).toEqual([]);
+        expect(Object.keys(scenario.solverConfigs).every((solver) => solverIds.includes(solver))).toBe(true);
+      }
+      // Its first version is the configuration, as for an experiment created through the API
+      const v1 = await as(NORA).get(`/experiments/${id}/version/1`);
+      expect(v1.body.scenarios.map((s: any) => [s.id, s.name])).toEqual(template.body.scenarios.map((s: any) => [s.id, s.name]));
+      expect(v1.body.metrics.map((m: any) => m.id).sort()).toEqual(template.body.metrics.map((m: any) => m.id).sort());
+    }
+    // Applied again, the migrations add nothing
+    expect(await migrate()).toEqual([]);
+  });
+
+  test("no one can change them through the API", async () => {
+    const [id] = PREDEFINED;
+    expect((await as(NORA).put(`/experiments/${id}`, { name: "Taken over" })).status).toBe(403);
+    expect((await as(ALICE).put(`/experiments/${id}`, { name: "Taken over" })).status).toBe(403);
+    expect((await as(NORA).delete(`/experiments/${id}`)).status).toBe(403);
+    expect((await as(NORA).post(`/experiments/${id}/publish/benchmark`)).status).toBe(403);
+    expect((await as(NORA).get(`/experiments/${id}/detailed`)).body.name).toBe("Solver benchmarking");
+  });
+
+  test("an experiment created from a template inherits its configuration and records it as its origin", async () => {
+    const template = (await as(NORA).get(`/experiments/${PREDEFINED[3]}/detailed`)).body;
+    const created = await as(NORA).post("/experiments", applied(template, { hypothesis: "My own hypothesis" }));
+
+    expect(created.status).toBe(201);
+    expect(created.body).toMatchObject({
+      status: "draft", version: 1, userRole: "owner", projectId: PROJECT_NORA, isTemplate: false,
+      description: template.description, hypothesis: "My own hypothesis", labels: template.labels,
+      clonedFrom: { experimentId: template.id, version: template.version, name: "Operational context comparison" },
+    });
+    const configuration = (e: any) => e.scenarios.map((s: any) => [s.name, s.solverConfigs, s.operationalContext ?? null]);
+    expect(configuration(created.body)).toEqual(configuration(template));
+    expect(created.body.metrics.map((m: any) => m.id).sort()).toEqual(template.metrics.map((m: any) => m.id).sort());
+    expect(created.body.scenarios.some((s: any) => template.scenarios.some((source: any) => source.id === s.id))).toBe(false);
+    const history = (await as(NORA).get(`/experiments/${created.body.id}/history`)).body;
+    expect(history.find((e: any) => e.eventType === "experiment_created").newValue.template).toEqual({ experimentId: template.id, version: 1 });
+
+    // The template is unchanged, and Nora got no right on it
+    const after = await as(NORA).get(`/experiments/${template.id}/detailed`);
+    expect(after.body).toMatchObject({ version: 1, name: template.name, permissions: { read: true, write: false, execute: false, manage: false } });
+    expect(after.body.scenarios).toEqual(template.scenarios);
+
+    // Without a template, no origin
+    const plain = await as(NORA).post("/experiments", { name: "Plain", projectId: PROJECT_NORA, scenarios: [] });
+    expect(plain.body.clonedFrom).toBeUndefined();
+  });
+
+  test("a researcher's published template: another user takes its configuration, not its private models", async () => {
+    const metricId = (await as(ALICE).get("/metrics/public")).body[0].id;
+    const { id } = await createExperiment(ALICE, { metrics: [metricId], scenarios: [{ name: "Private", modelIds: [ALICE_MODEL_ID], solverConfigs }] });
+    expect((await as(ALICE).post(`/experiments/${id}/publish/template`)).status).toBe(200);
+    const template = (await as(NORA).get(`/experiments/${id}/detailed`)).body;
+    expect((await as(NORA).get("/experiments/templates?pageNumber=1&pageSize=100")).body.data.map((e: any) => e.id)).toContain(id);
+
+    // Keeping Alice's model is refused (LAB-NF-05); without it, the creation goes through
+    const withModel = applied(template);
+    withModel.scenarios[0].modelIds = [ALICE_MODEL_ID];
+    expect((await as(NORA).post("/experiments", withModel)).status).toBe(403);
+    const created = await as(NORA).post("/experiments", applied(template));
+    expect(created.status).toBe(201);
+    expect(created.body.clonedFrom).toMatchObject({ experimentId: id, version: template.version });
+    expect(created.body.scenarios[0]).toMatchObject({ name: "Private", models: [], solverConfigs });
+
+    // Nora then picks her own model
+    const edited = await as(NORA).put(`/experiments/${created.body.id}`, { scenarios: [{ ...created.body.scenarios[0], modelIds: ["model-nora"] }] });
+    expect(edited.status).toBe(200);
+    expect(edited.body.scenarios[0].models.map((m: any) => m.modelId)).toEqual(["model-nora"]);
+    expect((await as(NORA).get(`/experiments/${id}/collaborators`)).status).toBe(403);
+  });
+
+  test("the template must still be published, and be the version applied", async () => {
+    const metricId = (await as(ALICE).get("/metrics/public")).body[0].id;
+    const publish = async (as_: "template" | "benchmark") => {
+      const { id } = await createExperiment(ALICE, { metrics: [metricId] });
+      expect((await as(ALICE).post(`/experiments/${id}/publish/${as_}`)).status).toBe(200);
+      return (await as(ALICE).get(`/experiments/${id}/detailed`)).body;
+    };
+    const before = await count();
+
+    // Changed since it was applied
+    const changed = await publish("template");
+    expect((await as(ALICE).put(`/experiments/${changed.id}`, { description: "Changed" })).status).toBe(200);
+    const stale = await as(NORA).post("/experiments", applied(changed));
+    expect(stale.status).toBe(409);
+    expect(stale.body.message).toBe("The template changed since you applied it (now version 2). Apply it again.");
+    expect((await as(NORA).post("/experiments", applied(changed, { templateVersion: "2" }))).status).toBe(400);
+
+    // A published benchmark, offered as a template by the interface, is an origin too
+    const benchmark = await publish("benchmark");
+    const fromBenchmark = await as(NORA).post("/experiments", applied(benchmark));
+    expect(fromBenchmark.status).toBe(201);
+    expect(fromBenchmark.body.clonedFrom).toMatchObject({ experimentId: benchmark.id, version: benchmark.version });
+
+    // Deleted, or no longer published, after it was applied
+    const deleted = await publish("template");
+    expect((await as(ALICE).delete(`/experiments/${deleted.id}`)).status).toBe(200);
+    const withdrawn = await publish("template");
+    await sequelize.query(`UPDATE ${SCHEMA}.experiment SET is_template = FALSE WHERE id = '${withdrawn.id}'`);
+    // An experiment Nora cannot read, an unknown id and a malformed one
+    const { id: privateId } = await createExperiment(ALICE);
+    const refused = [deleted.id, withdrawn.id, privateId, "00000000-0000-4000-8000-000000000000", "not-an-id"];
+    for (const templateId of refused) {
+      const response = await as(NORA).post("/experiments", applied(changed, { templateId, templateVersion: undefined }));
+      expect([templateId, response.status, response.body.message]).toEqual([templateId, 400, invalidTemplate]);
+    }
+    // Only the experiments of this test and the one from the benchmark exist: the refused requests created nothing
+    expect(await count()).toBe(before + 6);
   });
 });
 

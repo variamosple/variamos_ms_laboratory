@@ -51,6 +51,12 @@ export type ExperimentInput = Omit<Partial<ExperimentDetailed>, "scenarios" | "m
    * since, the change is refused with what they changed, instead of being lost.
    */
   expectedVersion?: number;
+  /**
+   * LAB-CF-05: on creation, the template the configuration was applied from, and the version applied.
+   * The new experiment records it as its origin.
+   */
+  templateId?: string;
+  templateVersion?: number;
   metrics?: (Metric | string)[];
   metricIds?: string[];
   scenarios?: (ScenarioInput & {
@@ -374,6 +380,29 @@ export default class ExperimentRepository {
     });
     const open = new Set(projects.map((project) => project.id));
     return new Set(models.filter((model) => model.projectId && open.has(model.projectId)).map((model) => model.id));
+  }
+
+  /**
+   * LAB-CF-05: the origin of an experiment created from a template. The template must still be published
+   * when the experiment is created, whatever the form kept, and be the version the user applied, so that
+   * the origin names what was really inherited. The interface offers published benchmarks as templates too,
+   * as a copy accepts both.
+   */
+  private async templateOrigin(templateId: unknown, templateVersion: unknown, transaction: Transaction) {
+    if (templateVersion !== undefined && !Number.isInteger(templateVersion)) {
+      throw new ValidationError("The template version must be a whole number.");
+    }
+    const template = typeof templateId === "string" && UUID_PATTERN.test(templateId)
+      ? await OrmExperiment.findByPk(templateId, { attributes: ["id", "version", "isTemplate", "isBenchmark", "deletedAt"], transaction })
+      : null;
+    // One answer for an unknown id and a private experiment, so that it does not tell which ids exist
+    if (!template || template.deletedAt || !(template.isTemplate || template.isBenchmark)) {
+      throw new ValidationError("This template does not exist or is no longer published.");
+    }
+    if (templateVersion !== undefined && templateVersion !== template.version) {
+      throw new ConflictError(`The template changed since you applied it (now version ${template.version}). Apply it again.`);
+    }
+    return { experimentId: template.id, version: template.version };
   }
 
   /**
@@ -784,6 +813,9 @@ export default class ExperimentRepository {
       const projectId = await this.ensureProjectAccess(experiment.projectId, userId, transaction);
       await this.ensureMetricsUsable(metricIds, userId, transaction);
       await this.ensureModelsUsable(scenarios.flatMap((scenario) => scenario.modelIds ?? []), userId, transaction);
+      const origin = experiment.templateId === undefined
+        ? undefined
+        : await this.templateOrigin(experiment.templateId, experiment.templateVersion, transaction);
 
       const createdExperiment = await OrmExperiment.create(
         {
@@ -797,6 +829,8 @@ export default class ExperimentRepository {
           status: "draft",
           isTemplate: false,
           isBenchmark: false,
+          clonedFromExperimentId: origin?.experimentId,
+          clonedFromVersion: origin?.version,
         },
         { transaction }
       );
@@ -826,7 +860,7 @@ export default class ExperimentRepository {
           experimentVersion: 1,
           userId,
           eventType: "experiment_created",
-          newValue: { ...snapshot, status: "draft" },
+          newValue: { ...snapshot, status: "draft", ...(origin ? { template: origin } : {}) },
         },
         { transaction }
       );

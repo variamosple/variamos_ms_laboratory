@@ -235,6 +235,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "LAB-CF-05: the template changed since the version that was applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -4181,6 +4191,15 @@
           "expectedVersion": {
             "type": "integer",
             "description": "LAB-COL-02: the version the user started editing from; a 409 lists what others saved since."
+          },
+          "templateId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "LAB-CF-05, on creation only: the published template (or benchmark) the configuration was applied from. The experiment records it as its origin (`clonedFrom`); one that does not exist or is no longer published is a 400."
+          },
+          "templateVersion": {
+            "type": "integer",
+            "description": "LAB-CF-05, with templateId: the version of the template that was applied. A 409 says the template changed since."
           }
         }
       },

@@ -32,8 +32,11 @@ test("the migrations adopt the tables of the first version without losing data",
     },
   ]);
 
-  const [scenarios] = await sequelize.query(`SELECT solver_configs FROM ${SCHEMA}.scenario`);
+  const [scenarios] = await sequelize.query(`SELECT solver_configs FROM ${SCHEMA}.scenario WHERE id = '33333333-3333-4333-8333-333333333333'`);
   expect(scenarios).toEqual([{ solver_configs: { z3: { timeOut: 60 } } }]);
+  // LAB-CF-05: the predefined templates come next to the adopted experiment
+  const [templates] = await sequelize.query(`SELECT count(*)::int AS n FROM ${SCHEMA}.experiment WHERE is_template AND project_id IS NULL`);
+  expect(templates).toEqual([{ n: 5 }]);
 
   const [owners] = await sequelize.query(`SELECT role FROM ${SCHEMA}.experiment_user`);
   expect(owners).toEqual([{ role: "owner" }]);
