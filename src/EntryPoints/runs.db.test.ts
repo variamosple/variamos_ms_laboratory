@@ -217,6 +217,66 @@ describe("LAB-CF-04: contradictory feature aliases", () => {
   });
 });
 
+describe("LAB-CF-04: alias validation uses pinned identities at run start", () => {
+  const identityModelId = "model-pinned-identities";
+  const originalModel = {
+    elements: [{ id: "gps", name: "GPS" }, { id: "radio", name: "Radio" }], relationships: [],
+  };
+
+  async function pinnedExperiment() {
+    await sequelize.query(
+      `INSERT INTO variamos.model (id, project_id, product_line_id, engineering_type, name, language_id, model)
+       VALUES ('${identityModelId}', '${PROJECT}', 'pl-1', 'domain', 'Pinned identities', 1, :snapshot)
+       ON CONFLICT (id) DO UPDATE SET model = EXCLUDED.model`,
+      { replacements: { snapshot: JSON.stringify(originalModel) } }
+    );
+    return readyExperiment({ scenarios: [{ name: "Pinned", modelIds: [identityModelId], solverConfigs: { minizinc },
+      operationalContext: { activeFeatures: ["gps"], inactiveFeatures: ["Radio"], extraConstraints: "" } }] });
+  }
+
+  test("a new conflict in the live model does not invalidate a valid pinned context", async () => {
+    const experiment = await pinnedExperiment();
+    await sequelize.query(`UPDATE variamos.model SET model = :snapshot WHERE id = '${identityModelId}'`, {
+      replacements: { snapshot: JSON.stringify({
+        elements: [{ id: "gps", name: "Radio" }, { id: "radio", name: "GPS" }], relationships: [],
+      }) },
+    });
+    const submit = jest.spyOn(gateway, "submit");
+    try {
+      const run = await runToEnd(experiment.id);
+      expect(run.status).toBe("completed");
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(submit.mock.calls[0][0].models[0].snapshot).toEqual(originalModel);
+      expect(submit.mock.calls[0][0].operationalContext).toMatchObject({ activeFeatures: ["gps"], inactiveFeatures: ["Radio"] });
+    } finally { submit.mockRestore(); }
+  });
+
+  test("a legacy contradiction in the pinned model is rejected even after live aliases change", async () => {
+    const experiment = await pinnedExperiment();
+    // Represent a context accepted before identity validation was introduced.
+    await sequelize.query(
+      `UPDATE ${SCHEMA}.scenario SET operational_context = '{"activeFeatures": ["gps"], "inactiveFeatures": ["GPS"], "extraConstraints": ""}' WHERE experiment_id = '${experiment.id}'`
+    );
+    await sequelize.query(`UPDATE variamos.model SET model = :snapshot WHERE id = '${identityModelId}'`, {
+      replacements: { snapshot: JSON.stringify({
+        elements: [{ id: "gps", name: "Renamed" }, { id: "radio", name: "GPS" }], relationships: [],
+      }) },
+    });
+    const submit = jest.spyOn(gateway, "submit");
+    try {
+      const started = await as(ALICE).post(`/experiments/${experiment.id}/runs`);
+      expect(started.status).toBe(400);
+      expect(started.body.details).toEqual(["Pinned: features both active and inactive (GPS)."]);
+      expect((await as(ALICE).get(`/experiments/${experiment.id}/runs`)).body).toEqual([]);
+      expect(await statusOf(experiment.id)).toBe("ready");
+      expect(submit).not.toHaveBeenCalled();
+    } finally {
+      await executor.whenIdle();
+      submit.mockRestore();
+    }
+  });
+});
+
 describe("LAB-RUN-01, LAB-RUN-03, LAB-EX-07: a run from start to end", () => {
   test("a Ready experiment runs in the background and completes", async () => {
     const experiment = await readyExperiment();
