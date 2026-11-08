@@ -3263,14 +3263,15 @@
         },
         "responses": {
           "201": {
-            "description": "The rebuilt experiment, and the metrics left out (private metrics of another user)",
+            "description": "The rebuilt experiment, the metrics left out (private metrics of another user), and the models kept only as the snapshots of the package (models the user cannot open)",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "required": [
                     "experiment",
-                    "metricsLeftOut"
+                    "metricsLeftOut",
+                    "modelsNotLinked"
                   ],
                   "properties": {
                     "experiment": {
@@ -3280,6 +3281,25 @@
                       "type": "array",
                       "items": {
                         "type": "string"
+                      }
+                    },
+                    "modelsNotLinked": {
+                      "type": "array",
+                      "description": "LAB-NF-05: each model of the package that is not in a project the user can open. The reproduction keeps its snapshot under a new id, linked to no platform model.",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "packageModelId",
+                          "modelId"
+                        ],
+                        "properties": {
+                          "packageModelId": {
+                            "type": "string"
+                          },
+                          "modelId": {
+                            "type": "string"
+                          }
+                        }
                       }
                     }
                   }

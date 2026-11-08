@@ -351,14 +351,13 @@ export default class ExperimentRepository {
   }
 
   /**
-   * LAB-NF-05: a scenario takes only models of projects the user can open (own, shared with them, or a
-   * template project of the platform, as the model picker offers them), since the experiment shows their
-   * content to everyone who can read it. A model that does not exist is refused the same way, so that the
-   * answer does not tell whether an id exists in someone else's project.
+   * LAB-NF-05: the models among `modelIds` that are in a project the user can open (own, shared with them,
+   * or a template project of the platform, as the model picker offers them). An experiment shows the
+   * content of its models to everyone who can read it, so it may refer only to these.
    */
-  private async ensureModelsUsable(modelIds: string[], userId: string, transaction?: Transaction) {
+  async usableModelIds(modelIds: string[], userId: string, transaction?: Transaction): Promise<Set<string>> {
     const ids = [...new Set(modelIds)];
-    if (!ids.length) return;
+    if (!ids.length) return new Set();
 
     const models = await OrmModel.findAll({ where: { id: ids }, attributes: ["id", "projectId"], transaction });
     const projectIds = [...new Set(models.map((model) => model.projectId).filter((id): id is string => !!id))];
@@ -375,9 +374,16 @@ export default class ExperimentRepository {
       OrmUserProject.findAll({ where: { projectId: projectIds, userId }, attributes: ["projectId"], transaction }),
     ]);
     const open = new Set([...owned.map((project) => project.id), ...memberships.map((membership) => membership.projectId)]);
-    const usable = new Set(models.filter((model) => model.projectId && open.has(model.projectId)).map((model) => model.id));
+    return new Set(models.filter((model) => model.projectId && open.has(model.projectId)).map((model) => model.id));
+  }
 
-    const refused = ids.filter((id) => !usable.has(id));
+  /**
+   * LAB-NF-05: a scenario takes only the models of `usableModelIds`. A model that does not exist is refused
+   * the same way, so that the answer does not tell whether an id exists in someone else's project.
+   */
+  private async ensureModelsUsable(modelIds: string[], userId: string, transaction?: Transaction) {
+    const usable = await this.usableModelIds(modelIds, userId, transaction);
+    const refused = [...new Set(modelIds)].filter((id) => !usable.has(id));
     if (refused.length) {
       throw new ForbiddenError(`These models are not in a project you can open: ${refused.join(", ")}.`);
     }

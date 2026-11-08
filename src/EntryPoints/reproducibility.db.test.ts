@@ -232,6 +232,8 @@ describe("LAB-RP-01 reproducibility package", () => {
       const copy = reproduced.body.experiment;
       expect(copy).toMatchObject({ status: "ready", projectId: OTHER_PROJECT, reproducedFrom: original.persistentId, name: `Car and phone (reproduction of ${original.persistentId})` });
       expect(reproduced.body.metricsLeftOut).toEqual([]);
+      // Alice can open her models: the reproduction stays linked to them
+      expect(reproduced.body.modelsNotLinked).toEqual([]);
 
       const again = await runToEnd(copy.id);
       expect(again.status).toBe("completed");
@@ -391,5 +393,118 @@ describe("LAB-RP-04 runs side by side", () => {
 
     expect((await as(ALICE).get(`/runs/compare?runId=${a.id}`)).status).toBe(400);
     expect((await as(BOB).get(`/runs/compare?runId=${a.id}&runId=${b.id}`)).status).toBe(403);
+  });
+});
+
+describe("LAB-NF-05: a package that names models the user cannot open", () => {
+  const BOB_PROJECT = "project-bob";
+  const BOB_MODEL = "model-bob";
+  const PRIVATE = "model-alice-private";
+  const SECRET = "Private feature of Alice";
+  const BOB_SNAPSHOT = { elements: [{ id: "own", name: "Own feature" }], relationships: [] };
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+  beforeAll(async () => {
+    await sequelize.query(`INSERT INTO variamos.project (id, owner_id, name) VALUES ('${BOB_PROJECT}', '${BOB}', 'Bob')`);
+    await sequelize.query(
+      `INSERT INTO variamos.model (id, project_id, product_line_id, engineering_type, name, language_id, model) VALUES
+       ('${BOB_MODEL}', '${BOB_PROJECT}', 'pl-b', 'domain', 'Own model', 1, :own),
+       ('${PRIVATE}', '${PROJECT}', 'pl-1', 'domain', 'Private model', 1, :secret)`,
+      { replacements: { own: JSON.stringify(BOB_SNAPSHOT), secret: JSON.stringify({ elements: [{ id: "secret", name: SECRET }], relationships: [] }) } }
+    );
+  });
+
+  /** A completed run of the experiment, and its package. */
+  async function packageOf(user: string, experimentId: string) {
+    const started = await as(user).post(`/experiments/${experimentId}/runs`);
+    expect(started.status).toBe(202);
+    await executor.whenIdle();
+    const run = (await as(user).get(`/experiments/${experimentId}/runs/${started.body.id}`)).body;
+    const file = await download(`/experiments/${experimentId}/runs/${run.id}/package`, user);
+    expect(file.status).toBe(200);
+    return { run, file: file.body as Buffer };
+  }
+
+  /** Bob's own package, with his model named by another id and every hash of the manifest recalculated. */
+  async function bobPackageNaming(modelId: string) {
+    const created = await as(BOB).post("/experiments", {
+      name: "Own model", projectId: BOB_PROJECT, metrics: METRICS,
+      scenarios: [{ name: "Own", modelIds: [BOB_MODEL], solverConfigs: { minizinc } }],
+    });
+    expect(created.status).toBe(201);
+    expect((await as(BOB).put(`/experiments/${created.body.id}/ready`)).status).toBe(200);
+    const parts = unzip((await packageOf(BOB, created.body.id)).file);
+    for (const file of ["manifest.json", "configuration.json", "results/run.json"]) {
+      parts.set(file, parts.get(file)!.split(BOB_MODEL).join(modelId));
+    }
+    const manifest = JSON.parse(parts.get("manifest.json")!);
+    manifest.files = manifest.files.map((file: any) => ({ ...file, sha256: sha256Hex(parts.get(file.path)!) }));
+    parts.set("manifest.json", JSON.stringify(manifest));
+    return Buffer.from(zip([...parts].map(([p, text]) => ({ path: p, data: Buffer.from(text) }))));
+  }
+
+  test.each([
+    ["a model of a project Bob cannot open", PRIVATE],
+    ["a model that does not exist", "model-unknown"],
+  ])("%s: the snapshot of the package is kept under a new id, linked to no model", async (_, modelId) => {
+    const reproduced = await upload(await bobPackageNaming(modelId), BOB_PROJECT, BOB);
+    expect(reproduced.status).toBe(201);
+    // The same answer in both cases: it does not tell whether the id exists elsewhere
+    const [{ packageModelId, modelId: newId }] = reproduced.body.modelsNotLinked;
+    expect(packageModelId).toBe(modelId);
+    expect(newId).toMatch(UUID);
+    const [model] = reproduced.body.experiment.scenarios[0].models;
+    expect(model.modelId).toBe(newId);
+    expect(model.model).toBeUndefined();
+    expect(model.pinned.hash).toBe(modelHash(BOB_SNAPSHOT));
+    expect(JSON.stringify(reproduced.body)).not.toContain(SECRET);
+  });
+
+  test("nothing of the model behind that id is shown, copied, restored or pinned later", async () => {
+    const reproduced = await upload(await bobPackageNaming(PRIVATE), BOB_PROJECT, BOB);
+    const id = reproduced.body.experiment.id;
+    const newId = reproduced.body.modelsNotLinked[0].modelId;
+
+    for (const read of ["detailed", "version/1", "history"]) {
+      const response = await as(BOB).get(`/experiments/${id}/${read}`);
+      expect(response.status).toBe(200);
+      expect(JSON.stringify(response.body)).not.toContain(SECRET);
+    }
+    const copy = await as(BOB).post(`/experiments/${id}/copy`, { projectId: BOB_PROJECT });
+    expect(copy.status).toBe(201);
+    expect(copy.body.scenarios[0].models.map((m: any) => m.modelId)).toEqual([newId]);
+    expect(JSON.stringify(copy.body)).not.toContain(SECRET);
+    const restored = await as(BOB).post(`/experiments/${id}/version/1/restore`);
+    expect(restored.status).toBe(200);
+    expect(JSON.stringify(restored.body)).not.toContain(SECRET);
+
+    // Changed, it cannot be marked Ready again: there is no platform model to pin
+    expect((await as(BOB).put(`/experiments/${id}`, { name: "Renamed reproduction" })).status).toBe(200);
+    const ready = await as(BOB).put(`/experiments/${id}/ready`);
+    expect(ready.status).toBe(400);
+    expect(ready.body.details).toContain(`Own: the model ${newId} no longer exists.`);
+  });
+
+  test("another user's package is reproduced from its snapshots, without access to the models", async () => {
+    const experiment = await readyExperiment();
+    const original = await packageOf(ALICE, experiment.id);
+
+    const reproduced = await upload(original.file, BOB_PROJECT, BOB);
+    expect(reproduced.status).toBe(201);
+    expect(reproduced.body.modelsNotLinked.map((m: any) => m.packageModelId).sort()).toEqual([CAR, PHONE]);
+    expect(reproduced.body.experiment.scenarios.flatMap((s: any) => s.models.map((m: any) => m.model))).toEqual([undefined, undefined]);
+
+    const again = await packageOf(BOB, reproduced.body.experiment.id);
+    expect(again.run.status).toBe("completed");
+    expect(again.run.provenance.scenarios.map((s: any) => [s.name, s.models.map((m: any) => m.hash), s.solvers, s.operationalContext]))
+      .toEqual(original.run.provenance.scenarios.map((s: any) => [s.name, s.models.map((m: any) => m.hash), s.solvers, s.operationalContext]));
+    // The same results, timings apart
+    const outcomes = (run: any) => run.scenarioRuns
+      .map(({ scenarioName, solverId, status, result }: any) => {
+        const { reasoningTimeMs, statistics, ...rest } = result ?? {};
+        return JSON.stringify([scenarioName, solverId, status, rest]);
+      })
+      .sort();
+    expect(outcomes(again.run)).toEqual(outcomes(original.run));
   });
 });

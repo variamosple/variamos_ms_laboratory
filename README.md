@@ -142,7 +142,9 @@ Invalid values stop the service at start-up.
   `variamos-laboratory-package/1`) with the models and the semantics of their languages named by their SHA-256
   in canonical JSON (LAB-RP-01 to 03).
 - `POST /reproductions` checks every hash of a package and rebuilds a Ready experiment with the models and
-  semantics of the package, not today's; a package made before the semantics was kept is refused;
+  semantics of the package, not today's; a package made before the semantics was kept is refused; a model
+  of the package that is not in a project the user can open is kept as its snapshot under a new id, linked
+  to no platform model (`modelsNotLinked`, LAB-NF-05);
   `GET /runs/compare` shows runs side by side and says whether they are equivalent, timings apart (LAB-RP-04).
 
 ## Comments
