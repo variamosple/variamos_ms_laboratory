@@ -350,6 +350,39 @@ export default class ExperimentRepository {
     return projectId;
   }
 
+  /**
+   * LAB-NF-05: a scenario takes only models of projects the user can open (own, shared with them, or a
+   * template project of the platform, as the model picker offers them), since the experiment shows their
+   * content to everyone who can read it. A model that does not exist is refused the same way, so that the
+   * answer does not tell whether an id exists in someone else's project.
+   */
+  private async ensureModelsUsable(modelIds: string[], userId: string, transaction?: Transaction) {
+    const ids = [...new Set(modelIds)];
+    if (!ids.length) return;
+
+    const models = await OrmModel.findAll({ where: { id: ids }, attributes: ["id", "projectId"], transaction });
+    const projectIds = [...new Set(models.map((model) => model.projectId).filter((id): id is string => !!id))];
+    const [owned, memberships] = await Promise.all([
+      OrmProject.findAll({
+        where: {
+          id: projectIds,
+          isDeleted: { [Op.not]: true },
+          [Op.or]: [{ ownerId: userId }, { template: true }],
+        },
+        attributes: ["id"],
+        transaction,
+      }),
+      OrmUserProject.findAll({ where: { projectId: projectIds, userId }, attributes: ["projectId"], transaction }),
+    ]);
+    const open = new Set([...owned.map((project) => project.id), ...memberships.map((membership) => membership.projectId)]);
+    const usable = new Set(models.filter((model) => model.projectId && open.has(model.projectId)).map((model) => model.id));
+
+    const refused = ids.filter((id) => !usable.has(id));
+    if (refused.length) {
+      throw new ForbiddenError(`These models are not in a project you can open: ${refused.join(", ")}.`);
+    }
+  }
+
   /** LAB-COL-02: what was saved after a version, by whom: "Version 3 by Alice: name changed". */
   private async changesSince(experimentId: string, version: number, transaction?: Transaction): Promise<string[]> {
     const events = await OrmExperimentHistory.findAll({
@@ -739,6 +772,7 @@ export default class ExperimentRepository {
     try {
       const projectId = await this.ensureProjectAccess(experiment.projectId, userId, transaction);
       await this.ensureMetricsUsable(metricIds, userId, transaction);
+      await this.ensureModelsUsable(scenarios.flatMap((scenario) => scenario.modelIds ?? []), userId, transaction);
 
       const createdExperiment = await OrmExperiment.create(
         {
@@ -862,6 +896,15 @@ export default class ExperimentRepository {
         userId,
         transaction
       );
+      // Only the models this save adds; a restored version brings back models of this experiment
+      if (restoredFromVersion === undefined) {
+        const previousModelIds = new Set(previousExperiment.scenarios.flatMap((s) => toScenarioInput(s).modelIds ?? []));
+        await this.ensureModelsUsable(
+          scenarios.flatMap((scenario) => scenario.modelIds ?? []).filter((id) => !previousModelIds.has(id)),
+          userId,
+          transaction
+        );
+      }
 
       const nextVersion = previousExperiment.version + 1;
       const history: ExperimentHistoryCreationAttributes[] = [];

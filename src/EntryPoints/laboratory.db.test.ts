@@ -29,6 +29,8 @@ const PROJECT_BOB = "project-bob";
 const PROJECT_SHARED = "project-shared";
 const PROJECT_OF: Record<string, string> = { [ALICE]: PROJECT_ALICE, [BOB]: PROJECT_BOB };
 const RADIO_MODEL_ID = "model-feature-2";
+// LAB-NF-05: a model of Alice's own project, which Bob cannot open
+const ALICE_MODEL_ID = "model-alice-private";
 
 /** Requests as a user; every response is checked against openapi.json. */
 const as = (user: string) => {
@@ -100,16 +102,27 @@ beforeAll(async () => {
      VALUES ('${MODEL_ID}', 'project-1', 'pl-1', 'domain', 'Car feature model', 1,
              '{"elements": [{"id": "root", "name": "Car"}, {"id": "e2", "name": "GPS"}], "relationships": []}'),
             ('${RADIO_MODEL_ID}', 'project-1', 'pl-1', 'domain', 'Radio feature model', 1,
-             '{"elements": [{"id": "r1", "name": "Radio"}], "relationships": []}')`
+             '{"elements": [{"id": "r1", "name": "Radio"}], "relationships": []}'),
+            ('${ALICE_MODEL_ID}', '${PROJECT_ALICE}', 'pl-a', 'domain', 'Alice private model', 1,
+             '{"elements": [{"id": "s1", "name": "Secret"}], "relationships": []}'),
+            ('model-of-template-project', 'project-template', 'pl-t', 'domain', 'Template project model', 1,
+             '{"elements": [{"id": "t1", "name": "Example"}], "relationships": []}')`
   );
   await sequelize.query(
     `INSERT INTO variamos.project (id, owner_id, name) VALUES
        ('${PROJECT_ALICE}', '${ALICE}', 'Alice project'),
        ('${PROJECT_BOB}', '${BOB}', 'Bob project'),
-       ('${PROJECT_SHARED}', '${BOB}', 'Shared project')`
+       ('${PROJECT_SHARED}', '${BOB}', 'Shared project'),
+       ('project-1', '${ALICE}', 'Models project')`
   );
   await sequelize.query(
-    `INSERT INTO variamos.user_project (user_id, project_id, role) VALUES ('${ALICE}', '${PROJECT_SHARED}', 'editor')`
+    `INSERT INTO variamos.project (id, owner_id, name, template) VALUES ('project-template', '${ALICE}', 'Examples', TRUE)`
+  );
+  // Alice owns the project of the shared models; Bob is a member of it
+  await sequelize.query(
+    `INSERT INTO variamos.user_project (user_id, project_id, role) VALUES
+       ('${ALICE}', '${PROJECT_SHARED}', 'editor'),
+       ('${BOB}', 'project-1', 'viewer')`
   );
   expect(await migrate()).toEqual([
     "001_initial_schema.sql",
@@ -360,6 +373,73 @@ describe("lifecycle (LAB-EX-03, LAB-EX-07, LAB-RUN-01, LAB-R-03)", () => {
     });
 
     expect(response.body.version).toBe(1);
+  });
+});
+
+describe("models of a project the user cannot open (LAB-NF-05)", () => {
+  const refusal = (ids: string) => `These models are not in a project you can open: ${ids}.`;
+  const scenarioWith = (modelIds: string[]) => [{ name: "S", modelIds, solverConfigs }];
+
+  test("an experiment cannot take them: their content would be shown with it", async () => {
+    const before = (await as(BOB).get("/experiments")).body.length;
+    const created = await as(BOB).post("/experiments", {
+      name: "Probe", projectId: PROJECT_BOB, scenarios: scenarioWith([MODEL_ID, ALICE_MODEL_ID]),
+    });
+
+    expect(created.status).toBe(403);
+    expect(created.body.message).toBe(refusal(ALICE_MODEL_ID));
+    expect((await as(BOB).get("/experiments")).body.length).toBe(before);
+  });
+
+  test("an unknown model is refused the same way, so existence is not revealed", async () => {
+    const created = await as(BOB).post("/experiments", {
+      name: "Probe", projectId: PROJECT_BOB, scenarios: scenarioWith(["model-that-does-not-exist"]),
+    });
+
+    expect(created.status).toBe(403);
+    expect(created.body.message).toBe(refusal("model-that-does-not-exist"));
+  });
+
+  test("a save cannot add them, and leaves the experiment unchanged", async () => {
+    const { id } = await createExperiment(BOB);
+    const updated = await as(BOB).put(`/experiments/${id}`, { scenarios: scenarioWith([ALICE_MODEL_ID]) });
+
+    expect(updated.status).toBe(403);
+    const detailed = (await as(BOB).get(`/experiments/${id}/detailed`)).body;
+    expect(detailed.version).toBe(1);
+    expect(detailed.scenarios[0].models.map((m: any) => m.modelId)).toEqual([MODEL_ID]);
+  });
+
+  test("the models of a template project of the platform can be used by everyone, as the picker offers them", async () => {
+    const created = await as(BOB).post("/experiments", {
+      name: "From the examples", projectId: PROJECT_BOB, scenarios: scenarioWith(["model-of-template-project"]),
+    });
+    expect(created.status).toBe(201);
+  });
+
+  test("a member of a project can use its models", async () => {
+    const created = await as(BOB).post("/experiments", {
+      name: "Member", projectId: PROJECT_BOB, scenarios: scenarioWith([MODEL_ID, RADIO_MODEL_ID]),
+    });
+    expect(created.status).toBe(201);
+  });
+
+  test("a collaborator keeps the models already in a shared experiment, and can restore a version", async () => {
+    const { id } = await createExperiment(ALICE, { scenarios: scenarioWith([ALICE_MODEL_ID]) });
+    await as(ALICE).post(`/experiments/${id}/share`, { userEmail: "bob@example.org", role: "editor" });
+
+    const renamed = await as(BOB).put(`/experiments/${id}`, { name: "Renamed by Bob" });
+    expect(renamed.status).toBe(200);
+    expect(renamed.body.scenarios[0].models.map((m: any) => m.modelId)).toEqual([ALICE_MODEL_ID]);
+
+    await as(ALICE).put(`/experiments/${id}`, { scenarios: scenarioWith([MODEL_ID]) });
+    const restored = await as(BOB).post(`/experiments/${id}/version/1/restore`);
+    expect(restored.status).toBe(200);
+    expect(restored.body.scenarios[0].models.map((m: any) => m.modelId)).toEqual([ALICE_MODEL_ID]);
+
+    // Keeping it while adding a model he can open is a normal save
+    const added = await as(BOB).put(`/experiments/${id}`, { scenarios: scenarioWith([ALICE_MODEL_ID, MODEL_ID]) });
+    expect(added.status).toBe(200);
   });
 });
 
