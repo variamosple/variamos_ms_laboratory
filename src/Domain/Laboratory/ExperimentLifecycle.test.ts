@@ -121,6 +121,25 @@ describe("validation before Ready (LAB-RUN-01, LAB-CF-01..04, LAB-R-03)", () => 
     ]);
   });
 
+  test("a feature named by its id in one list and by its name in the other is both active and inactive", () => {
+    const withElements = {
+      ...catalog,
+      models: new Map([["model-1", new Set(["gps", "GPS", "radio", "Radio"])]]),
+      elements: new Map([["model-1", [{ id: "gps", name: "GPS" }, { id: "radio", name: "Radio" }]]]),
+    };
+    const scenario = (activeFeatures: string[], inactiveFeatures: string[]) => ({
+      ...complete,
+      scenarios: [{ name: "S1", modelIds: ["model-1"], solverConfigs: { z3 }, operationalContext: { activeFeatures, inactiveFeatures } }],
+    });
+
+    expect(validateForReady(scenario(["gps"], ["GPS"]), withElements)).toEqual(["S1: features both active and inactive (GPS)."]);
+    expect(validateForReady(scenario(["GPS"], ["gps"]), withElements)).toEqual(["S1: features both active and inactive (GPS)."]);
+    expect(validateForReady(scenario(["GPS"], ["GPS"]), withElements)).toEqual(["S1: features both active and inactive (GPS)."]);
+    // Different features, whatever the way they are named
+    expect(validateForReady(scenario(["gps"], ["Radio"]), withElements)).toEqual([]);
+    expect(validateForReady(scenario(["GPS"], ["radio"]), withElements)).toEqual([]);
+  });
+
   test("an experiment without scenario cannot be Ready", () => {
     expect(validateForReady({ ...complete, scenarios: [] }, catalog)).toContain("Add at least one scenario.");
   });

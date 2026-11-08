@@ -89,9 +89,11 @@ export const Config = {
       POLL_INTERVAL_MS: setting("LAB_RUN_POLL_INTERVAL_MS", 500, 10),
       MAX_RUNTIME_SECONDS: setting("LAB_RUN_MAX_RUNTIME_SECONDS", 3600, 1),
     },
-    // Which implementation answers behind each gateway. Only the mocks exist: results are simulated
+    // Which implementation answers behind each gateway. The mocks run nothing: their results are simulated
     GATEWAYS: {
-      REASONING: choice("LAB_REASONING_GATEWAY", "mock", ["mock"] as const, "The real gateway waits for the Reasoning API (roadmap Q5)."),
+      REASONING: choice("LAB_REASONING_GATEWAY", "mock", ["mock", "semantic_translator"] as const),
+      // The /query endpoint of the semantic translator (variamosple/semantic_translator), for LAB_REASONING_GATEWAY=semantic_translator
+      SEMANTIC_TRANSLATOR_URL: process.env.LAB_SEMANTIC_TRANSLATOR_URL || "",
       NOTIFICATIONS: choice("LAB_NOTIFICATION_GATEWAY", "mock", ["mock"] as const, "The real gateway waits for the run template of the notification service."),
     },
 }

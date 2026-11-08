@@ -1,5 +1,6 @@
 import { RunView } from "../Laboratory/Entities/Run";
 import { ExperimentConfigSnapshot } from "../Laboratory/Entities/ExperimentVersion";
+import { UNPINNED_VERSION } from "../Reasoning/Entities/SolverDescriptor";
 import { canonicalJson, modelHash, sha256Hex } from "../Core/canonicalJson";
 import { resultRows, toCsv } from "./results";
 import { unzip, zip } from "./zip";
@@ -97,6 +98,9 @@ export function buildPackage(input: PackageInput): Buffer {
         ? ["Semantics: this run started before the Laboratory kept the semantics of the languages; the package records only the language id of its models."]
         : []),
       ...(simulated ? ["Results: the Reasoning module was simulated (mock gateway); the results show what the Laboratory sent, not real reasoning."] : []),
+      ...([...solvers.values()].some((solver) => solver.version === UNPINNED_VERSION)
+        ? ["Solver versions: the semantic translator does not report them; a run on another deployment may use other solver versions."]
+        : []),
     ],
     files: files.map((file) => ({ path: file.path, sha256: sha256Hex(file.text) })),
   };

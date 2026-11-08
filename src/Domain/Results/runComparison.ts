@@ -25,19 +25,26 @@ export interface RunComparison {
   equivalent: boolean;
 }
 
-/** Timings change from one execution to the next: they are compared, not required to be equal. */
-const TIMING_RESULT_FIELDS = new Set(["reasoningTimeMs"]);
+/**
+ * Timings change from one execution to the next: they are compared, not required to be equal.
+ * `statistics` holds the timings the semantic translator reports for each request.
+ */
+const TIMING_RESULT_FIELDS = new Set(["reasoningTimeMs", "statistics"]);
 const TIMING_METRIC_IDS = new Set(["6c1ab000-0000-4000-8000-000000000005"]);
 
 const scenarioKey = (name: string | null, index: number) => name || `Scenario ${index + 1}`;
 
 export function configurationOf(run: RunView): Record<string, unknown> {
   return {
+    // Which implementation answered: a simulated run and a real one differ here (LAB-RP-02)
+    reasoning: run.provenance.reasoning?.gateway ?? null,
     scenarios: Object.fromEntries(
       run.provenance.scenarios.map((scenario, index) => [
         scenarioKey(scenario.name, index),
         {
           models: scenario.models.map((m) => m.hash),
+          // The semantics of their languages, pinned at Ready (LAB-RP-01); null before it was kept
+          semantics: scenario.models.map((m) => m.semanticsHash ?? null),
           solvers: Object.fromEntries(scenario.solvers.map((s) => [s.id, { version: s.version, parameters: s.parameters }])),
           operationalContext: scenario.operationalContext ?? null,
         },

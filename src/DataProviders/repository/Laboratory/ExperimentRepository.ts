@@ -20,6 +20,7 @@ import { OrmScenarioModel } from "../../../Domain/Laboratory/Entities/ScenarioMo
 import { OrmRun } from "../../../Domain/Laboratory/Entities/Run";
 import { getNotificationGateway } from "../../../Domain/Notifications/NotificationGateway";
 import { getReasoningGateway } from "../../../Domain/Reasoning/ReasoningGateway";
+import { gatewayProblems } from "../../../Domain/Reasoning/gatewayProblems";
 import { OrmExperimentHistory, ExperimentHistoryCreationAttributes, ExperimentHistory } from "../../../Domain/Laboratory/Entities/ExperimentHistory";
 import { ExperimentConfigSnapshot, OrmExperimentVersion } from "../../../Domain/Laboratory/Entities/ExperimentVersion";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../../../Domain/Core/Entities/Errors";
@@ -33,6 +34,7 @@ import {
   editRejection,
   validateForReady,
   featureNames,
+  contextElements,
   Permission,
   permissionsOf,
   sharedRole,
@@ -1166,6 +1168,7 @@ export default class ExperimentRepository {
           })
         : [];
 
+      const gateway = getReasoningGateway();
       const problems = validateForReady(
         {
           name: detailed.name,
@@ -1174,7 +1177,8 @@ export default class ExperimentRepository {
         },
         {
           models: new Map(models.map((model) => [model.id, featuresOf(model)])),
-          solvers: await getReasoningGateway().listSolvers(),
+          elements: new Map(models.map((model) => [model.id, contextElements(model.model)])),
+          solvers: await gateway.listSolvers(),
         }
       );
 
@@ -1185,6 +1189,25 @@ export default class ExperimentRepository {
       models
         .filter((model) => !languages.some((language) => language.id === model.languageId))
         .forEach((model) => problems.push(`The language ${model.languageId} of the model ${model.name ?? model.id} does not exist.`));
+
+      // LAB-RUN-01: what the gateway would receive, with the copies about to be pinned
+      if (problems.length === 0) {
+        problems.push(...gatewayProblems(gateway, scenarios.map((scenario, index) => ({
+          label: scenario.name?.trim() || `Scenario ${index + 1}`,
+          solverConfigs: scenario.solverConfigs,
+          operationalContext: scenario.operationalContext,
+          models: (scenario.modelIds ?? []).map((modelId) => {
+            const model = models.find((m) => m.id === modelId)!;
+            return {
+              modelId,
+              languageId: model.languageId,
+              hash: modelHash(model.model),
+              snapshot: model.model,
+              semantics: languages.find((language) => language.id === model.languageId)!.semantics ?? {},
+            };
+          }),
+        }))));
+      }
 
       if (problems.length > 0) {
         throw new ValidationError("The experiment is not ready to run.", problems);

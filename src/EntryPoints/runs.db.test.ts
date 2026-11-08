@@ -23,6 +23,9 @@ import { setReasoningGateway } from "../Domain/Reasoning/ReasoningGateway";
 import { setNotificationGateway } from "../Domain/Notifications/NotificationGateway";
 import { RunExecutor, RunExecutorOptions, setRunExecutor } from "../DataProviders/execution/RunExecutor";
 import RunRepository from "../DataProviders/repository/Laboratory/RunRepository";
+import SemanticTranslatorReasoningGateway from "../DataProviders/reasoning/SemanticTranslatorReasoningGateway";
+import { ok, projects, startStub } from "../test-support/semanticTranslatorStub";
+import { unzip } from "../Domain/Results/zip";
 
 const SCHEMA = Config.DB.SCHEMA;
 const ALICE = "user-alice";
@@ -134,6 +137,144 @@ beforeEach(() => {
 afterAll(async () => {
   await executor.whenIdle();
   await sequelize.close();
+});
+
+describe("LAB-CF-04: contradictory feature aliases", () => {
+  const aliasModelId = "model-alias";
+  const z3Unpinned = { version: "unpinned", timeOut: 5, mode: "satisfiability", maxSolutions: 1000 };
+
+  async function createAliasExperiment(active: string, inactive: string) {
+    await sequelize.query(
+      `INSERT INTO variamos.model (id, project_id, product_line_id, engineering_type, name, language_id, model)
+       VALUES ('${aliasModelId}', '${PROJECT}', 'pl-1', 'domain', 'Alias model', 1,
+               '{"elements": [{"id": "gps", "name": "GPS", "properties": [{"name": "Selected", "value": "Undefined"}]}], "relationships": []}')
+       ON CONFLICT (id) DO NOTHING`
+    );
+    const created = await as(ALICE).post("/experiments", {
+      name: "Contradictory feature aliases", projectId: PROJECT, metrics: [metricId],
+      scenarios: [{ name: "Z3", modelIds: [aliasModelId], solverConfigs: { z3: z3Unpinned },
+        operationalContext: { activeFeatures: [active], inactiveFeatures: [inactive], extraConstraints: "" } }],
+    });
+    expect(created.status).toBe(201);
+    return created.body.id as string;
+  }
+
+  test.each([["gps", "GPS"], ["GPS", "gps"]])(
+    "Ready refuses active %s and inactive %s before a request is sent",
+    async (active, inactive) => {
+      const stub = await startStub(() => ok(true));
+      try {
+        setReasoningGateway(new SemanticTranslatorReasoningGateway({ url: stub.url }));
+        const id = await createAliasExperiment(active, inactive);
+        const ready = await as(ALICE).put(`/experiments/${id}/ready`);
+        expect(ready.status).toBe(400);
+        expect(await statusOf(id)).toBe("draft");
+        expect(stub.received).toHaveLength(0);
+      } finally { await stub.close(); }
+    }
+  );
+
+  test("Ready refuses them with a gateway that has no check of its own, as the mock in production", async () => {
+    const mock = new MockReasoningGateway({ durationMs: 50 });
+    mock.listSolvers = () => new SemanticTranslatorReasoningGateway({ url: "http://127.0.0.1:9/query" }).listSolvers();
+    setReasoningGateway(mock);
+    const id = await createAliasExperiment("gps", "GPS");
+    const ready = await as(ALICE).put(`/experiments/${id}/ready`);
+
+    expect(ready.status).toBe(400);
+    expect(ready.body.details).toEqual(["Z3: features both active and inactive (GPS)."]);
+    expect(await statusOf(id)).toBe("draft");
+  });
+
+  test("start refuses contradictory aliases stored before this check", async () => {
+    // Ready with a valid context, then the contradiction written as an experiment made Ready before
+    // the check would hold it
+    const previous = new MockReasoningGateway({ durationMs: 50 });
+    previous.listSolvers = () => new SemanticTranslatorReasoningGateway({ url: "http://127.0.0.1:9/query" }).listSolvers();
+    setReasoningGateway(previous);
+    const id = await createAliasExperiment("gps", "gps");
+    await sequelize.query(
+      `UPDATE ${SCHEMA}.scenario SET operational_context = '{"activeFeatures": [], "inactiveFeatures": [], "extraConstraints": ""}' WHERE experiment_id = '${id}'`
+    );
+    expect((await as(ALICE).put(`/experiments/${id}/ready`)).status).toBe(200);
+    await sequelize.query(
+      `UPDATE ${SCHEMA}.scenario SET operational_context = '{"activeFeatures": ["gps"], "inactiveFeatures": ["GPS"], "extraConstraints": ""}' WHERE experiment_id = '${id}'`
+    );
+
+    const stub = await startStub(() => ok(true));
+    try {
+      setReasoningGateway(new SemanticTranslatorReasoningGateway({ url: stub.url }));
+      const started = await as(ALICE).post(`/experiments/${id}/runs`);
+      expect(started.status).toBe(400);
+      expect(started.body.details).toEqual(["Z3: features both active and inactive (GPS)."]);
+      expect((await as(ALICE).get(`/experiments/${id}/runs`)).body).toEqual([]);
+      expect(await statusOf(id)).toBe("ready");
+      expect(stub.received).toHaveLength(0);
+    } finally {
+      await executor.whenIdle();
+      await stub.close();
+    }
+  });
+});
+
+describe("LAB-CF-04: alias validation uses pinned identities at run start", () => {
+  const identityModelId = "model-pinned-identities";
+  const originalModel = {
+    elements: [{ id: "gps", name: "GPS" }, { id: "radio", name: "Radio" }], relationships: [],
+  };
+
+  async function pinnedExperiment() {
+    await sequelize.query(
+      `INSERT INTO variamos.model (id, project_id, product_line_id, engineering_type, name, language_id, model)
+       VALUES ('${identityModelId}', '${PROJECT}', 'pl-1', 'domain', 'Pinned identities', 1, :snapshot)
+       ON CONFLICT (id) DO UPDATE SET model = EXCLUDED.model`,
+      { replacements: { snapshot: JSON.stringify(originalModel) } }
+    );
+    return readyExperiment({ scenarios: [{ name: "Pinned", modelIds: [identityModelId], solverConfigs: { minizinc },
+      operationalContext: { activeFeatures: ["gps"], inactiveFeatures: ["Radio"], extraConstraints: "" } }] });
+  }
+
+  test("a new conflict in the live model does not invalidate a valid pinned context", async () => {
+    const experiment = await pinnedExperiment();
+    await sequelize.query(`UPDATE variamos.model SET model = :snapshot WHERE id = '${identityModelId}'`, {
+      replacements: { snapshot: JSON.stringify({
+        elements: [{ id: "gps", name: "Radio" }, { id: "radio", name: "GPS" }], relationships: [],
+      }) },
+    });
+    const submit = jest.spyOn(gateway, "submit");
+    try {
+      const run = await runToEnd(experiment.id);
+      expect(run.status).toBe("completed");
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(submit.mock.calls[0][0].models[0].snapshot).toEqual(originalModel);
+      expect(submit.mock.calls[0][0].operationalContext).toMatchObject({ activeFeatures: ["gps"], inactiveFeatures: ["Radio"] });
+    } finally { submit.mockRestore(); }
+  });
+
+  test("a legacy contradiction in the pinned model is rejected even after live aliases change", async () => {
+    const experiment = await pinnedExperiment();
+    // Represent a context accepted before identity validation was introduced.
+    await sequelize.query(
+      `UPDATE ${SCHEMA}.scenario SET operational_context = '{"activeFeatures": ["gps"], "inactiveFeatures": ["GPS"], "extraConstraints": ""}' WHERE experiment_id = '${experiment.id}'`
+    );
+    await sequelize.query(`UPDATE variamos.model SET model = :snapshot WHERE id = '${identityModelId}'`, {
+      replacements: { snapshot: JSON.stringify({
+        elements: [{ id: "gps", name: "Renamed" }, { id: "radio", name: "GPS" }], relationships: [],
+      }) },
+    });
+    const submit = jest.spyOn(gateway, "submit");
+    try {
+      const started = await as(ALICE).post(`/experiments/${experiment.id}/runs`);
+      expect(started.status).toBe(400);
+      expect(started.body.details).toEqual(["Pinned: features both active and inactive (GPS)."]);
+      expect((await as(ALICE).get(`/experiments/${experiment.id}/runs`)).body).toEqual([]);
+      expect(await statusOf(experiment.id)).toBe("ready");
+      expect(submit).not.toHaveBeenCalled();
+    } finally {
+      await executor.whenIdle();
+      submit.mockRestore();
+    }
+  });
 });
 
 describe("LAB-RUN-01, LAB-RUN-03, LAB-EX-07: a run from start to end", () => {
@@ -322,6 +463,102 @@ describe("LAB-CF-01 to LAB-CF-04, LAB-RP-02: what a run executes", () => {
     expect(run.startedAt).not.toBeNull();
     expect(run.finishedAt).not.toBeNull();
     expect(new Date(run.finishedAt).getTime()).toBeGreaterThanOrEqual(new Date(run.startedAt).getTime());
+  });
+});
+
+describe("roadmap Q5: a run through the semantic translator (local stand-in of /query)", () => {
+  test("the run sends the pinned model and semantics, and stores real results and metrics", async () => {
+    const stub = await startStub((body) => (body.data.query.operation === "nsolve" ? ok(projects(8)) : ok(true)));
+    try {
+      setReasoningGateway(new SemanticTranslatorReasoningGateway({ url: stub.url }));
+      const z3Translator = { version: "unpinned", timeOut: 5, mode: "enumeration", maxSolutions: 100 };
+      const experiment = await readyExperiment({ scenarios: [{ name: "Z3", modelIds: [MODEL_ID], solverConfigs: { z3: z3Translator } }] });
+      const run = await runToEnd(experiment.id);
+
+      expect(run.status).toBe("completed");
+      expect(run.provenance.reasoning).toEqual({ gateway: "semantic_translator" });
+      const [scenarioRun] = run.scenarioRuns;
+      expect(scenarioRun).toMatchObject({ status: "completed", solverId: "z3", solverVersion: "unpinned", attempts: 1 });
+      expect(scenarioRun.jobId).toMatch(/^st-/);
+      expect(scenarioRun.result).toMatchObject({ simulated: false, satisfiable: true, products: 8, configurations: 8 });
+      // The pinned copy and the semantics of its language, frozen at Ready (LAB-CF-01, LAB-RP-01)
+      expect(stub.received.map((body) => body.data.query.operation)).toEqual(["sat", "nsolve"]);
+      const sent = stub.received[0].data;
+      expect(sent.modelSelectedId).toBe(MODEL_ID);
+      expect(sent.rules).toEqual({ elementTypes: ["Feature", "Bundle"], relationTypes: ["Mandatory", "Optional"] });
+      expect(sent.project.productLines[0].domainEngineering.models[0].elements.map((element: any) => element.name)).toEqual(["Car", "GPS", "Radio"]);
+      // Degree of variability: 8 products / 2^3 features, not simulated
+      expect(scenarioRun.metrics).toEqual([{ metricId, value: 1, reason: null, inputs: { products: 8, features: 3 }, simulated: false }]);
+
+      // LAB-RP-01: the package says the results are real, and that the solver version is not known
+      const file = await request(app).get(`/experiments/${experiment.id}/runs/${run.id}/package`).set("x-test-user", ALICE).buffer(true)
+        .parse((res, done) => { const chunks: Buffer[] = []; res.on("data", (c: Buffer) => chunks.push(c)); res.on("end", () => done(null, Buffer.concat(chunks))); });
+      expect(file.status).toBe(200);
+      const manifest = JSON.parse(unzip(file.body as Buffer).get("manifest.json")!);
+      expect(manifest.reasoning).toEqual({ gateway: "semantic_translator", simulated: false });
+      expect(manifest.limitations).toEqual(["Solver versions: the semantic translator does not report them; a run on another deployment may use other solver versions."]);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  // LAB-RUN-01: a configuration the translator cannot take is refused before anything is sent
+  const z3Unpinned = { version: "unpinned", timeOut: 5, mode: "satisfiability", maxSolutions: 1000 };
+
+  test("Ready refuses a configuration the translator cannot take, with the reason", async () => {
+    const stub = await startStub(() => ok(true));
+    try {
+      setReasoningGateway(new SemanticTranslatorReasoningGateway({ url: stub.url }));
+      const created = await as(ALICE).post("/experiments", {
+        name: "Car with constraints",
+        projectId: PROJECT,
+        metrics: [metricId],
+        scenarios: [{
+          name: "Z3",
+          modelIds: [MODEL_ID],
+          solverConfigs: { z3: z3Unpinned },
+          operationalContext: { activeFeatures: [], inactiveFeatures: [], extraConstraints: "GPS => Radio" },
+        }],
+      });
+      expect(created.status).toBe(201);
+
+      const refused = await as(ALICE).put(`/experiments/${created.body.id}/ready`);
+      expect(refused.status).toBe(400);
+      expect(refused.body.message).toBe("The experiment is not ready to run.");
+      expect(refused.body.details).toEqual(["Z3 (z3): semantic_translator: extra constraints of the operational context cannot be sent."]);
+      expect(await statusOf(created.body.id)).toBe("draft");
+      expect(stub.received).toHaveLength(0);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  test("a run is refused before it is created when the gateway changed since Ready and cannot take it", async () => {
+    // Ready on a gateway with the translator's catalog but no check of its own, with a context the
+    // translator cannot force: the elements of the model have no "Selected" property
+    const before = new MockReasoningGateway({ durationMs: 50 });
+    before.listSolvers = () => new SemanticTranslatorReasoningGateway({ url: "http://127.0.0.1:9/query" }).listSolvers();
+    setReasoningGateway(before);
+    const experiment = await readyExperiment({
+      scenarios: [{ name: "Z3", modelIds: [MODEL_ID], solverConfigs: { z3: z3Unpinned }, operationalContext: { activeFeatures: ["GPS"], inactiveFeatures: [], extraConstraints: "" } }],
+    });
+
+    const stub = await startStub(() => ok(true));
+    try {
+      setReasoningGateway(new SemanticTranslatorReasoningGateway({ url: stub.url }));
+      const refused = await as(ALICE).post(`/experiments/${experiment.id}/runs`);
+
+      expect(refused.status).toBe(400);
+      expect(refused.body.message).toBe("The experiment cannot run.");
+      expect(refused.body.details).toEqual([
+        'Z3 (z3): semantic_translator: the feature "GPS" has no "Selected" property, so the operational context cannot force it.',
+      ]);
+      expect((await as(ALICE).get(`/experiments/${experiment.id}/runs`)).body).toEqual([]);
+      expect(await statusOf(experiment.id)).toBe("ready");
+      expect(stub.received).toHaveLength(0);
+    } finally {
+      await stub.close();
+    }
   });
 });
 

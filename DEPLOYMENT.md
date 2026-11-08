@@ -35,7 +35,9 @@ marked **open**.
 | `VARIAMOS_PUBLIC_KEY_PATH` | yes | public key of the platform session (`@variamosple/variamos-security`), mounted as a file. The service only checks sessions: it needs no private key |
 | `LAB_CORS_ORIGINS` | no | origins allowed to call the service with the session cookie; by default the platform and the local servers of the interface (README) |
 | `LAB_RUN_*` | defaults in the README | invalid values stop the service |
-| `LAB_REASONING_GATEWAY`, `LAB_NOTIFICATION_GATEWAY` | `mock` | only the mocks exist: every result is marked simulated |
+| `LAB_REASONING_GATEWAY` | `mock` | `mock` marks every result simulated; `semantic_translator` runs real solvers |
+| `LAB_SEMANTIC_TRANSLATOR_URL` | with `semantic_translator` | the `/query` endpoint of the VariaMos semantic translator; the service does not start without it |
+| `LAB_NOTIFICATION_GATEWAY` | `mock` | only the mock exists |
 
 ## 3. Images and server
 
