@@ -26,15 +26,18 @@ const CANCEL_TIMEOUT_MS = 3000;
  * CANCEL_TIMEOUT_MS and without failing: the run is cancelled in any case.
  */
 export async function releaseJob(jobId: string) {
+  let deadline: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
       getReasoningGateway().cancel(jobId),
-      sleep(CANCEL_TIMEOUT_MS).then(() => {
-        throw new Error(`no answer in ${CANCEL_TIMEOUT_MS} ms`);
+      new Promise<never>((_resolve, reject) => {
+        deadline = setTimeout(() => reject(new Error(`no answer in ${CANCEL_TIMEOUT_MS} ms`)), CANCEL_TIMEOUT_MS);
       }),
     ]);
   } catch (error) {
     console.error(`The Reasoning module did not confirm the cancellation of job ${jobId}:`, error);
+  } finally {
+    if (deadline !== undefined) clearTimeout(deadline);
   }
 }
 
