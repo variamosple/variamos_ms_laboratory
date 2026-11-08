@@ -163,6 +163,12 @@ export function bodyOf(plan: TranslatorPlan, model: Model, query: TranslatorQuer
   };
 }
 
+/** The answer to sat: a boolean. Anything else is an error, never "unsatisfiable". */
+export function satisfiableIn(content: unknown): boolean {
+  if (typeof content === "boolean") return content;
+  throw new Error(`semantic_translator: unexpected answer to sat: ${JSON.stringify(content)?.slice(0, 200)}`);
+}
+
 /** Number of solutions in a /query answer: false, one project, or a list of projects. */
 export function solutionsIn(content: unknown): number {
   if (content === false) return 0;
@@ -181,6 +187,28 @@ export function coreFeaturesIn(content: unknown): number {
   }
   return content.filter((pair) => pair[1] === false).length;
 }
+
+/** Connection errors raised before the request reached the translator: sending it again cannot run it twice. */
+const NOT_SENT = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH", "UND_ERR_CONNECT_TIMEOUT"]);
+
+/** The system error code under a fetch failure (one cause, or several when every address was tried). */
+function connectionErrorCode(error: unknown): string | undefined {
+  const cause = (error as { cause?: { code?: unknown; errors?: { code?: unknown }[] } })?.cause;
+  const code = cause?.code ?? cause?.errors?.find((inner) => inner?.code !== undefined)?.code;
+  return typeof code === "string" ? code : undefined;
+}
+
+const errorDetail = (error: unknown) => {
+  // Not instanceof Error: fetch may throw an error of another realm (the test environment does)
+  const raw = (error as { message?: unknown })?.message;
+  const message = typeof raw === "string" ? raw : String(error);
+  const code = connectionErrorCode(error);
+  return code ? `${message}, ${code}` : message;
+};
+
+/** The request may have reached the translator: not sent again (a permanent failure of the attempt). */
+const outcomeUnknown = (what: string) =>
+  new Error(`semantic_translator: ${what}; it may still be running the request, so the Laboratory does not send it again.`);
 
 interface Job {
   state: ReasoningJobState;
@@ -263,7 +291,7 @@ export default class SemanticTranslatorReasoningGateway implements ReasoningGate
 
     try {
       // Under the operational context when there is one (LAB-CF-04)
-      const satisfiable = (await ask(plan.contextModel ?? plan.model, sat)) === true;
+      const satisfiable = satisfiableIn(await ask(plan.contextModel ?? plan.model, sat));
       let modelSatisfiable = plan.contextModel ? undefined : satisfiable;
       const result: Record<string, unknown> = {
         simulated: false,
@@ -298,7 +326,7 @@ export default class SemanticTranslatorReasoningGateway implements ReasoningGate
         .filter((type): type is string => Boolean(type)))];
       if (types.length === 0) warnings.push("No element has a \"Selected\" property: required features were not computed.");
       else {
-        if (modelSatisfiable === undefined) modelSatisfiable = (await ask(plan.model, sat)) === true;
+        if (modelSatisfiable === undefined) modelSatisfiable = satisfiableIn(await ask(plan.model, sat));
         if (!modelSatisfiable) warnings.push("The model has no valid configuration: required features are not defined.");
         else {
           try {
@@ -322,7 +350,12 @@ export default class SemanticTranslatorReasoningGateway implements ReasoningGate
     }
   }
 
-  /** One request to /query; the answer's data, or an error saying whether trying again may help (LAB-RUN-06). */
+  /**
+   * One request to /query; the answer's data, or an error saying whether trying again may help (LAB-RUN-06).
+   * /query has no job id to look up or deduplicate: a request is sent again only when it is known that the
+   * translator did not receive it, or refused it. When the request may have reached it, the translator may
+   * still be running it, and sending it again could run the same solver job twice.
+   */
   private async post(body: unknown, timeoutMs: number, cancelled: AbortSignal): Promise<{ content: unknown; statistics?: unknown }> {
     // One signal for both ends of a request: the job cancelled, or no answer in time
     const controller = new AbortController();
@@ -333,30 +366,47 @@ export default class SemanticTranslatorReasoningGateway implements ReasoningGate
     }, timeoutMs);
     const onCancel = () => controller.abort();
     cancelled.addEventListener("abort", onCancel);
+    const interrupted = () => {
+      if (cancelled.aborted) return new Error("Cancelled.");
+      if (timedOut) return new Error(`semantic_translator did not answer within ${timeoutMs / 1000} s (timeOut).`);
+      return null;
+    };
 
     let status: number;
     let text: string;
     try {
-      const response = await fetch(this.url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
+      let response: Response;
+      try {
+        response = await fetch(this.url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+      } catch (error) {
+        const code = connectionErrorCode(error);
+        throw interrupted()
+          ?? (code !== undefined && NOT_SENT.has(code)
+            ? new TransientReasoningError(`semantic_translator could not be reached: ${errorDetail(error)}`)
+            : outcomeUnknown(`the connection failed after the request was sent (${errorDetail(error)})`));
+      }
       status = response.status;
-      text = await response.text();
-    } catch (error) {
-      if (cancelled.aborted) throw new Error("Cancelled.");
-      if (timedOut) throw new Error(`semantic_translator did not answer within ${timeoutMs / 1000} s (timeOut).`);
-      throw new TransientReasoningError(`semantic_translator could not be reached: ${error instanceof Error ? error.message : String(error)}`);
+      try {
+        text = await response.text();
+      } catch (error) {
+        throw interrupted() ?? outcomeUnknown(`the answer was lost (${errorDetail(error)})`);
+      }
     } finally {
       clearTimeout(timer);
       cancelled.removeEventListener("abort", onCancel);
     }
 
-    if ([429, 502, 503, 504].includes(status)) {
+    // Refused before any work: worth trying again
+    if (status === 429 || status === 503) {
       throw new TransientReasoningError(`semantic_translator is unavailable (HTTP ${status}).`);
     }
+    // A proxy between the Laboratory and the translator gave up: the translator may have the request
+    if (status === 502 || status === 504) throw outcomeUnknown(`a proxy answered HTTP ${status}`);
     if (status < 200 || status >= 300) throw new Error(`semantic_translator answered HTTP ${status}: ${text.slice(0, 300)}`);
 
     let answer: any;

@@ -208,12 +208,19 @@ describe("failures, retries and cancellation (LAB-RUN-04, LAB-RUN-06)", () => {
     expect(done.error?.message).toMatch(/^semantic_translator answered HTTP 500/);
   });
 
-  test("unavailable (HTTP 503) or unreachable: the job fails as transient, so the run tries again", async () => {
+  test("unavailable (HTTP 503, 429) or unreachable: the job fails as transient, so the run tries again", async () => {
     stub = await startStub(() => ({ status: 503, text: "Service Unavailable" }));
     const gateway = new SemanticTranslatorReasoningGateway({ url: stub.url });
     expect(await settled(gateway, (await gateway.submit(requestOf())).jobId)).toMatchObject({
       state: "FAILED",
       error: { message: "semantic_translator is unavailable (HTTP 503).", transient: true },
+    });
+    await stub.close();
+    stub = await startStub(() => ({ status: 429, text: "Too Many Requests" }));
+    const busy = new SemanticTranslatorReasoningGateway({ url: stub.url });
+    expect(await settled(busy, (await busy.submit(requestOf())).jobId)).toMatchObject({
+      state: "FAILED",
+      error: { message: "semantic_translator is unavailable (HTTP 429).", transient: true },
     });
 
     const url = stub.url;
@@ -222,8 +229,37 @@ describe("failures, retries and cancellation (LAB-RUN-04, LAB-RUN-06)", () => {
     const unreachable = new SemanticTranslatorReasoningGateway({ url });
     const done = await settled(unreachable, (await unreachable.submit(requestOf())).jobId);
     expect(done).toMatchObject({ state: "FAILED", error: { transient: true } });
-    expect(done.error?.message).toMatch(/^semantic_translator could not be reached/);
+    expect(done.error?.message).toMatch(/^semantic_translator could not be reached: fetch failed, ECONNREFUSED/);
   });
+
+  // /query has no job id: when the request may have reached the translator, it may still be running it
+  test.each([
+    ["a proxy answers HTTP 504", { status: 504, text: "Gateway Time-out" }, /a proxy answered HTTP 504/],
+    ["a proxy answers HTTP 502", { status: 502, text: "Bad Gateway" }, /a proxy answered HTTP 502/],
+    ["the connection closes after the request was received", { drop: true }, /the connection failed after the request was sent/],
+    ["the connection closes during the answer", { truncate: true }, /the answer was lost/],
+  ])("%s: the outcome is unknown, so the job fails without retry", async (_case, answer, message) => {
+    stub = await startStub(() => answer);
+    const gateway = new SemanticTranslatorReasoningGateway({ url: stub.url });
+    const done = await settled(gateway, (await gateway.submit(requestOf())).jobId);
+
+    expect(done).toMatchObject({ state: "FAILED", error: { transient: false } });
+    expect(done.error?.message).toMatch(message);
+    expect(done.error?.message).toMatch(/it may still be running the request, so the Laboratory does not send it again\.$/);
+    expect(stub.received).toHaveLength(1);
+  });
+
+  test.each([["a string", "yes"], ["null", null], ["a project", { id: "p" }]])(
+    "an answer to sat that is %s is an error, not \"unsatisfiable\"",
+    async (_case, content) => {
+      stub = await startStub(() => ok(content));
+      const gateway = new SemanticTranslatorReasoningGateway({ url: stub.url });
+      const done = await settled(gateway, (await gateway.submit(requestOf())).jobId);
+
+      expect(done).toMatchObject({ state: "FAILED", error: { transient: false } });
+      expect(done.error?.message).toMatch(/^semantic_translator: unexpected answer to sat: /);
+    }
+  );
 
   test("no answer within timeOut fails the job", async () => {
     stub = await startStub(() => ({ hang: true }));

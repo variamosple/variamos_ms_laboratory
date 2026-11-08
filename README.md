@@ -54,7 +54,10 @@ The Laboratory never runs a solver itself (LAB-R-02): everything goes through `R
   scenario; no extra constraints; no optimization mode; solver versions are not reported, so they are
   recorded as `unpinned` and the reproducibility package says so; and `/query` answers synchronously with
   no job to cancel, so cancelling a run stops the Laboratory waiting while the translator may finish the
-  request it received (LAB-RUN-04). Its tests run against a local stand-in of `/query`
+  request it received (LAB-RUN-04). For the same reason a request is sent again (LAB-RUN-06) only when the
+  translator did not receive it or refused it (connection refused, HTTP 429 or 503); after a proxy error
+  (HTTP 502, 504), a lost connection or no answer within `timeOut`, the scenario run fails, since the
+  translator may still be running the request. Its tests run against a local stand-in of `/query`
   (`src/test-support/semanticTranslatorStub.ts`), never a real instance.
 
 The end of a run is sent to `NotificationGateway`, a mock until the VariaMos notification service is

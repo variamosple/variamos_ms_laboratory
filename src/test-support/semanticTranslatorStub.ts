@@ -13,7 +13,17 @@ export const OPERATIONS = ["sat", "solve", "nsolve", "get_model", "get_code", "o
 const TARGETS = ["minizinc", "swi", "z3"];
 
 export type Body = { data: any };
-export type Answer = { status?: number; json?: unknown; text?: string; delayMs?: number; hang?: boolean };
+export type Answer = {
+  status?: number;
+  json?: unknown;
+  text?: string;
+  delayMs?: number;
+  hang?: boolean;
+  /** Closes the connection after the request was received, with no answer. */
+  drop?: boolean;
+  /** Sends the status and the start of the body, then closes the connection. */
+  truncate?: boolean;
+};
 
 export interface Stub {
   url: string;
@@ -57,6 +67,16 @@ export async function startStub(answer: (body: Body) => Answer): Promise<Stub> {
         if (!res.writableEnded) stub.aborted += 1;
       });
       if (reply.hang) return;
+      if (reply.drop) {
+        res.destroy();
+        return;
+      }
+      if (reply.truncate) {
+        res.writeHead(reply.status ?? 200, { "Content-Type": "application/json", "Content-Length": "1000" });
+        res.write('{"data": {"cont');
+        setTimeout(() => res.destroy(), 20);
+        return;
+      }
       setTimeout(() => {
         res.statusCode = reply.status ?? 200;
         res.setHeader("Content-Type", reply.text !== undefined ? "text/html" : "application/json");
