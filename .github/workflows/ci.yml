@@ -33,6 +33,9 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v7
+      with:
+        # The whole history, for SonarCloud to tell new code from old
+        fetch-depth: 0
 
     - name: Set up Node.js
       uses: actions/setup-node@v7
@@ -47,8 +50,15 @@ jobs:
     - name: Build
       run: npm run build
 
-    - name: Unit, HTTP, contract and isolation tests
-      run: npm test
+    - name: Unit, HTTP, contract and isolation tests, with their coverage
+      run: npm test -- --coverage
 
-    - name: Integration tests on PostgreSQL
-      run: npm run test:db
+    - name: Integration tests on PostgreSQL, with their coverage
+      run: npm run test:db -- --coverage --coverageDirectory=coverage/db
+
+    # The organization's token is not given to Dependabot pull requests
+    - name: Analyze with SonarCloud, coverage included
+      if: github.event.pull_request.user.login != 'dependabot[bot]'
+      uses: SonarSource/sonarqube-scan-action@4d1dc0c91ee400dcf8a6dddf2f705ac36542e304 # v8.4.0
+      env:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
