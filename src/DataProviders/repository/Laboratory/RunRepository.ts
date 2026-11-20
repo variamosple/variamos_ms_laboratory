@@ -582,6 +582,15 @@ export default class RunRepository {
         .map((m) => m.id);
       const missing = configuration.metrics.filter((m) => !usable.includes(m.id)).map((m) => m.name);
 
+      // LAB-NF-05: a package names its models by their ids on the platform, and anyone can write any id in
+      // it. A model the user cannot open keeps the snapshot of the package under a new id, linked to no
+      // platform model, so that the reproduction never shows or pins the live model behind that id.
+      const packageModelIds = [...new Set(configuration.scenarios.flatMap((s) => s.models.map((m) => m.modelId)))];
+      const linked = await this.experiments.usableModelIds(packageModelIds, userId, transaction);
+      const detached = new Map(packageModelIds.filter((modelId) => !linked.has(modelId)).map((modelId) => [modelId, randomUUID()]));
+      const modelIdOf = (modelId: string) => detached.get(modelId) ?? modelId;
+      const modelsNotLinked = [...detached].map(([packageModelId, modelId]) => ({ packageModelId, modelId }));
+
       const id = randomUUID();
       const name = `${manifest.experiment.name} (reproduction of ${manifest.persistentId})`;
       await OrmExperiment.create(
@@ -621,7 +630,7 @@ export default class RunRepository {
           scenario.models.map((model, index) => ({
             scenarioId: scenario.newId,
             position: index,
-            modelId: model.modelId,
+            modelId: modelIdOf(model.modelId),
             modelLanguageId: model.languageId,
             modelSnapshot: snapshots.get(model.hash),
             modelSnapshotHash: model.hash,
@@ -646,7 +655,7 @@ export default class RunRepository {
             scenarios: scenarios.map((s) => ({
               id: s.newId,
               name: s.name,
-              modelIds: s.models.map((m) => m.modelId),
+              modelIds: s.models.map((m) => modelIdOf(m.modelId)),
               solverConfigs: Object.fromEntries(s.solvers.map((solver) => [solver.id, { version: solver.version, ...solver.parameters }])) as any,
               operationalContext: (s.operationalContext ?? undefined) as any,
             })),
@@ -660,13 +669,22 @@ export default class RunRepository {
           experimentVersion: 1,
           userId,
           eventType: "experiment_reproduced",
-          newValue: { persistentId: manifest.persistentId, sourceExperiment: manifest.experiment.name, ...(missing.length ? { metricsLeftOut: missing } : {}) },
+          newValue: {
+            persistentId: manifest.persistentId,
+            sourceExperiment: manifest.experiment.name,
+            ...(missing.length ? { metricsLeftOut: missing } : {}),
+            ...(modelsNotLinked.length ? { modelsNotLinked } : {}),
+          },
         },
         { transaction }
       );
 
       await transaction.commit();
-      return { experiment: await this.experiments.loadDetailed(id, ExperimentRoleEnum.OWNER, undefined, userId), metricsLeftOut: missing };
+      return {
+        experiment: await this.experiments.loadDetailed(id, ExperimentRoleEnum.OWNER, undefined, userId),
+        metricsLeftOut: missing,
+        modelsNotLinked,
+      };
     } catch (error) {
       await transaction.rollback();
       throw error;

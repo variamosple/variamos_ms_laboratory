@@ -51,6 +51,12 @@ export type ExperimentInput = Omit<Partial<ExperimentDetailed>, "scenarios" | "m
    * since, the change is refused with what they changed, instead of being lost.
    */
   expectedVersion?: number;
+  /**
+   * LAB-CF-05: on creation, the template the configuration was applied from, and the version applied.
+   * The new experiment records it as its origin.
+   */
+  templateId?: string;
+  templateVersion?: number;
   metrics?: (Metric | string)[];
   metricIds?: string[];
   scenarios?: (ScenarioInput & {
@@ -350,6 +356,67 @@ export default class ExperimentRepository {
     return projectId;
   }
 
+  /**
+   * LAB-NF-05: the models among `modelIds` that are in a project the user can open (own, shared with them,
+   * or a template project of the platform, as the model picker offers them). An experiment shows the
+   * content of its models to everyone who can read it, so it may refer only to these.
+   */
+  async usableModelIds(modelIds: string[], userId: string, transaction?: Transaction): Promise<Set<string>> {
+    const ids = [...new Set(modelIds)];
+    if (!ids.length) return new Set();
+
+    const models = await OrmModel.findAll({ where: { id: ids }, attributes: ["id", "projectId"], transaction });
+    const projectIds = [...new Set(models.map((model) => model.projectId).filter((id): id is string => !!id))];
+    const memberships = await OrmUserProject.findAll({ where: { projectId: projectIds, userId }, attributes: ["projectId"], transaction });
+    // A deleted project is closed to its members too, as in ensureProjectAccess
+    const projects = await OrmProject.findAll({
+      where: {
+        id: projectIds,
+        isDeleted: { [Op.not]: true },
+        [Op.or]: [{ ownerId: userId }, { template: true }, { id: memberships.map((membership) => membership.projectId) }],
+      },
+      attributes: ["id"],
+      transaction,
+    });
+    const open = new Set(projects.map((project) => project.id));
+    return new Set(models.filter((model) => model.projectId && open.has(model.projectId)).map((model) => model.id));
+  }
+
+  /**
+   * LAB-CF-05: the origin of an experiment created from a template. The template must still be published
+   * when the experiment is created, whatever the form kept, and be the version the user applied, so that
+   * the origin names what was really inherited. The interface offers published benchmarks as templates too,
+   * as a copy accepts both.
+   */
+  private async templateOrigin(templateId: unknown, templateVersion: unknown, transaction: Transaction) {
+    if (templateVersion !== undefined && !Number.isInteger(templateVersion)) {
+      throw new ValidationError("The template version must be a whole number.");
+    }
+    const template = typeof templateId === "string" && UUID_PATTERN.test(templateId)
+      ? await OrmExperiment.findByPk(templateId, { attributes: ["id", "version", "isTemplate", "isBenchmark", "deletedAt"], transaction })
+      : null;
+    // One answer for an unknown id and a private experiment, so that it does not tell which ids exist
+    if (!template || template.deletedAt || !(template.isTemplate || template.isBenchmark)) {
+      throw new ValidationError("This template does not exist or is no longer published.");
+    }
+    if (templateVersion !== undefined && templateVersion !== template.version) {
+      throw new ConflictError(`The template changed since you applied it (now version ${template.version}). Apply it again.`);
+    }
+    return { experimentId: template.id, version: template.version };
+  }
+
+  /**
+   * LAB-NF-05: a scenario takes only the models of `usableModelIds`. A model that does not exist is refused
+   * the same way, so that the answer does not tell whether an id exists in someone else's project.
+   */
+  private async ensureModelsUsable(modelIds: string[], userId: string, transaction?: Transaction) {
+    const usable = await this.usableModelIds(modelIds, userId, transaction);
+    const refused = [...new Set(modelIds)].filter((id) => !usable.has(id));
+    if (refused.length) {
+      throw new ForbiddenError(`These models are not in a project you can open: ${refused.join(", ")}.`);
+    }
+  }
+
   /** LAB-COL-02: what was saved after a version, by whom: "Version 3 by Alice: name changed". */
   private async changesSince(experimentId: string, version: number, transaction?: Transaction): Promise<string[]> {
     const events = await OrmExperimentHistory.findAll({
@@ -413,6 +480,9 @@ export default class ExperimentRepository {
     scenarios: ExperimentInput["scenarios"],
     existingIds: string[] = []
   ): (ScenarioInput & { id: string })[] {
+    if (scenarios != null && (!Array.isArray(scenarios) || scenarios.some((scenario) => !scenario || typeof scenario !== "object"))) {
+      throw new ValidationError("The scenarios must be a list of scenarios.");
+    }
     return (scenarios ?? []).map((scenario, index) => ({
       id: scenario.id && existingIds.includes(scenario.id) ? scenario.id : randomUUID(),
       name: scenario.name?.trim() || `Scenario ${index + 1}`,
@@ -425,9 +495,12 @@ export default class ExperimentRepository {
 
   /** The scenario models, in order and without duplicates. */
   private modelIdsOf(scenario: NonNullable<ExperimentInput["scenarios"]>[number]): string[] {
+    if ((scenario.modelIds != null && !Array.isArray(scenario.modelIds)) || (scenario.models != null && !Array.isArray(scenario.models))) {
+      throw new ValidationError("The models of a scenario must be a list.");
+    }
     const ids =
       scenario.modelIds ??
-      scenario.models?.map((model) => model.modelId) ??
+      scenario.models?.map((model) => model?.modelId) ??
       (scenario.modelId ? [scenario.modelId] : []);
     return [...new Set(ids.filter((id): id is string => typeof id === "string" && id !== ""))];
   }
@@ -739,6 +812,10 @@ export default class ExperimentRepository {
     try {
       const projectId = await this.ensureProjectAccess(experiment.projectId, userId, transaction);
       await this.ensureMetricsUsable(metricIds, userId, transaction);
+      await this.ensureModelsUsable(scenarios.flatMap((scenario) => scenario.modelIds ?? []), userId, transaction);
+      const origin = experiment.templateId === undefined
+        ? undefined
+        : await this.templateOrigin(experiment.templateId, experiment.templateVersion, transaction);
 
       const createdExperiment = await OrmExperiment.create(
         {
@@ -752,6 +829,8 @@ export default class ExperimentRepository {
           status: "draft",
           isTemplate: false,
           isBenchmark: false,
+          clonedFromExperimentId: origin?.experimentId,
+          clonedFromVersion: origin?.version,
         },
         { transaction }
       );
@@ -781,7 +860,7 @@ export default class ExperimentRepository {
           experimentVersion: 1,
           userId,
           eventType: "experiment_created",
-          newValue: { ...snapshot, status: "draft" },
+          newValue: { ...snapshot, status: "draft", ...(origin ? { template: origin } : {}) },
         },
         { transaction }
       );
@@ -862,6 +941,15 @@ export default class ExperimentRepository {
         userId,
         transaction
       );
+      // Only the models this save adds; a restored version brings back models of this experiment
+      if (restoredFromVersion === undefined) {
+        const previousModelIds = new Set(previousExperiment.scenarios.flatMap((s) => toScenarioInput(s).modelIds ?? []));
+        await this.ensureModelsUsable(
+          scenarios.flatMap((scenario) => scenario.modelIds ?? []).filter((id) => !previousModelIds.has(id)),
+          userId,
+          transaction
+        );
+      }
 
       const nextVersion = previousExperiment.version + 1;
       const history: ExperimentHistoryCreationAttributes[] = [];
@@ -1379,7 +1467,17 @@ export default class ExperimentRepository {
         userId,
         randomUUID
       );
-      const { scenarios, metricIds } = clone;
+      const { metricIds } = clone;
+      // LAB-NF-05: the copy belongs to the user and follows its models as they change. As another user's
+      // private metrics are, the models the user cannot open are left out: reading a shared experiment or a
+      // template once must not give a lasting view of them.
+      const sourceModelIds = [...new Set(clone.scenarios.flatMap((scenario) => scenario.modelIds ?? []))];
+      const usable = await this.usableModelIds(sourceModelIds, userId, transaction);
+      const modelsLeftOut = sourceModelIds.filter((modelId) => !usable.has(modelId));
+      const scenarios = clone.scenarios.map((scenario) => ({
+        ...scenario,
+        modelIds: (scenario.modelIds ?? []).filter((modelId) => usable.has(modelId)),
+      }));
 
       const newExperiment = await OrmExperiment.create(
         {
@@ -1432,7 +1530,7 @@ export default class ExperimentRepository {
             sourceExperimentId: source.id,
             sourceVersion: source.version,
           },
-          newValue: { ...snapshot, status: "draft" },
+          newValue: { ...snapshot, status: "draft", ...(modelsLeftOut.length ? { modelsLeftOut } : {}) },
         },
         { transaction }
       );

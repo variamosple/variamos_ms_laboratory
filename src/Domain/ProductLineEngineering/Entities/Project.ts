@@ -6,6 +6,8 @@ export interface ProjectAttributes {
   id: string;
   ownerId: string;
   name?: string;
+  /** A template project of the platform, which every user can open to take its models. */
+  template?: boolean | null;
   isDeleted?: boolean | null;
 }
 
@@ -13,6 +15,7 @@ export class OrmProject extends Model<ProjectAttributes> implements ProjectAttri
   declare id: string;
   declare ownerId: string;
   declare name?: string;
+  declare template?: boolean | null;
   declare isDeleted?: boolean | null;
 }
 
@@ -30,6 +33,9 @@ OrmProject.init(
     },
     name: {
       type: Sequelize.TEXT,
+    },
+    template: {
+      type: Sequelize.BOOLEAN,
     },
     isDeleted: {
       type: Sequelize.BOOLEAN,

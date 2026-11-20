@@ -96,6 +96,22 @@ executes only when given that permission (`POST /experiments/:id/share` with `pe
 users cannot be given access. A save names `expectedVersion`; when someone saved since, the answer is 409 with
 the changes made in between (LAB-COL-02).
 
+Models (LAB-NF-05): an experiment shows the content of its models to everyone who can read it, so a scenario
+takes only models of a project the user can open (owned, shared with them and not deleted, or a template
+project of the platform); creating or saving with another model, or an unknown one, is a 403. A save checks
+only the models it adds, so collaborators keep the models already there. A copy (`POST /experiments/:id/copy`)
+leaves out the models the user cannot open, as it leaves out another user's private metrics; the
+`experiment_copied` event lists them (`modelsLeftOut`).
+
+Templates (LAB-CF-05): `GET /experiments/templates` lists the published templates, readable by every user. Five
+are predefined (migration 012: solver benchmarking, configurability analysis, variability metrics of a model,
+operational context comparison, reproducibility check); they have no project, no owner and no models, so no one
+can change them, and their solver settings name no version. A researcher publishes their own with
+`POST /experiments/:id/publish/template`. The interface applies a template to the creation form and sends
+`templateId` and `templateVersion` with `POST /experiments`: the experiment records the template as its origin
+(`clonedFrom`); a published benchmark can be applied the same way. A template that no longer exists or is no
+longer published is a 400; one that changed since it was applied is a 409.
+
 Ready checks: a name, at least one metric and one scenario; each scenario has one or more existing models
 whose language exists, at least one solver from the catalog pinned to an available version with valid
 parameters, and an operational context naming only features of its models. Ready then pins a copy of each
@@ -142,7 +158,9 @@ Invalid values stop the service at start-up.
   `variamos-laboratory-package/1`) with the models and the semantics of their languages named by their SHA-256
   in canonical JSON (LAB-RP-01 to 03).
 - `POST /reproductions` checks every hash of a package and rebuilds a Ready experiment with the models and
-  semantics of the package, not today's; a package made before the semantics was kept is refused;
+  semantics of the package, not today's; a package made before the semantics was kept is refused; a model
+  of the package that is not in a project the user can open is kept as its snapshot under a new id, linked
+  to no platform model (`modelsNotLinked`, LAB-NF-05);
   `GET /runs/compare` shows runs side by side and says whether they are equivalent, timings apart (LAB-RP-04).
 
 ## Comments
