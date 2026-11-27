@@ -2,7 +2,8 @@
 -- Until then they were created by hand in a schema named variamos_laboratory_test.
 -- __SCHEMA__ is replaced by DB_SCHEMA when the migration runs.
 
-CREATE SCHEMA IF NOT EXISTS __SCHEMA__;
+-- The schema is created by migrate.ts, and only when it is missing: a
+-- CREATE SCHEMA here would require CREATE on the database even when it exists.
 
 CREATE TABLE IF NOT EXISTS __SCHEMA__.experiment (
   id           UUID PRIMARY KEY,
