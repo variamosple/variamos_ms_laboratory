@@ -12,6 +12,8 @@ const SCHEMA_PATTERN = /^[a-z_][a-z0-9_]*$/;
 /**
  * Applies the SQL files of migrations/ in name order, once each, and records
  * them in <schema>.schema_migration. Each file runs in its own transaction.
+ * The schema is created only when it is missing: an account that owns it
+ * needs no CREATE right on the database.
  */
 export async function migrate(
   db: Sequelize = sequelize,
@@ -22,7 +24,15 @@ export async function migrate(
     throw new Error(`Invalid schema name: ${schema}`);
   }
 
-  await db.query(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
+  // CREATE SCHEMA checks CREATE on the database before IF NOT EXISTS, so it fails
+  // for an account without that right even when the schema exists: look first.
+  const [schemas] = await db.query(`SELECT 1 FROM pg_namespace WHERE nspname = :schema`, {
+    replacements: { schema },
+  });
+  if (schemas.length === 0) {
+    // IF NOT EXISTS: another instance may create it in the meantime
+    await db.query(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
+  }
   await db.query(
     `CREATE TABLE IF NOT EXISTS ${schema}.schema_migration (
        id TEXT PRIMARY KEY,
